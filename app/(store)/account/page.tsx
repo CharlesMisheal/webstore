@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'My Account' };
 
 interface AccountPageProps {
-  searchParams: { tab?: string };
+  searchParams: { tab?: string; welcome?: string };
 }
 
 export default async function AccountPage({ searchParams }: AccountPageProps) {
@@ -44,7 +44,12 @@ export default async function AccountPage({ searchParams }: AccountPageProps) {
             {displayName.charAt(0).toUpperCase()}
           </div>
           <div>
-            <h1 className="font-serif text-2xl text-ivory">{displayName}</h1>
+            <p className="text-[10px] uppercase tracking-widest text-gold-light font-semibold">
+              {searchParams.welcome ? 'Signed in' : 'My account'}
+            </p>
+            <h1 className="font-serif text-2xl text-ivory">
+              {searchParams.welcome ? `Welcome, ${displayName.split(' ')[0]}` : displayName}
+            </h1>
             <p className="text-xs text-stone">{user.email}</p>
             {user.email_verified && (
               <span className="inline-block mt-1 text-[10px] bg-navy-2 text-gold-light px-2 py-0.5 rounded border border-gold/30">

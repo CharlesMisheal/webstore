@@ -9,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export const metadata = { title: 'Create Account' };
 
 interface SignupPageProps {
-  searchParams: { next?: string };
+  searchParams: { next?: string; error?: string };
 }
 
 /**
@@ -48,7 +48,13 @@ export default async function SignupPage({ searchParams }: SignupPageProps) {
           ))}
         </ul>
 
-        <GoogleSignInButton next={next} label="Sign up with Google" />
+        {searchParams.error && (
+          <div className="p-3 bg-red-50 text-aplus-error text-xs rounded border border-red-200" role="alert">
+            Google sign-in could not be completed. Please try again.
+          </div>
+        )}
+
+        <GoogleSignInButton next={next} />
 
         <p className="text-[11px] text-text-3 text-center">
           Already have an account?{' '}

@@ -4,9 +4,12 @@ import { Footer } from '@/components/layout/Footer';
 import { CartDrawer } from '@/components/cart/CartDrawer';
 import { WhatsAppButton } from '@/components/ui/WhatsAppButton';
 import { getCategories } from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
+
+export const dynamic = 'force-dynamic';
 
 export default async function StoreLayout({ children }: { children: React.ReactNode }) {
-  const categories = await getCategories();
+  const [categories, user] = await Promise.all([getCategories(), getCurrentUser()]);
 
   return (
     <>
@@ -18,7 +21,7 @@ export default async function StoreLayout({ children }: { children: React.ReactN
         Skip to main content
       </a>
 
-      <Navbar categories={categories} />
+      <Navbar categories={categories} customerName={user?.full_name || null} />
       <CartDrawer />
       <WhatsAppButton />
 

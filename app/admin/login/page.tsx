@@ -22,14 +22,16 @@ interface AdminLoginPageProps {
 export default async function AdminLoginPage({ searchParams }: AdminLoginPageProps) {
   // Already an authorized admin with a live session? Go straight in.
   const user = await getCurrentUser();
-  if (user && !searchParams.denied && !searchParams.timeout) {
+  if (user && !searchParams.timeout) {
     try {
       await authorizeAdminUser(user);
-      redirect(searchParams.next?.startsWith('/admin') ? searchParams.next : '/admin');
+      if (!searchParams.denied) {
+        redirect(searchParams.next?.startsWith('/admin') ? searchParams.next : '/admin');
+      }
     } catch (err) {
       if (!(err instanceof HttpError)) throw err;
-      // Signed in as a non-admin — fall through to the denied panel.
-      searchParams = { ...searchParams, denied: user.email };
+      // Shopper signed in with Google — owner portal is closed to them.
+      redirect('/account');
     }
   }
 
@@ -85,15 +87,21 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
                   )}
                 </p>
                 <p className="text-[11px] text-text-3">
-                  This portal is reserved for the store owner. The attempt has been recorded in the audit trail.
+                  This portal is reserved for the store owner. Shoppers sign in from Account to place and track orders.
                 </p>
               </div>
 
+              <Link href="/account" className="block w-full py-3 bg-navy text-ivory text-xs font-semibold rounded hover:bg-navy-2 transition text-center">
+                Continue to your customer account
+              </Link>
+              <Link href="/auth/login" className="block text-center text-xs text-navy font-semibold hover:underline">
+                Sign in as a shopper
+              </Link>
               {user && (
                 <form action="/auth/signout" method="post">
                   <input type="hidden" name="next" value="/admin/login" />
-                  <button type="submit" className="w-full py-3 bg-navy text-ivory text-xs font-semibold rounded hover:bg-navy-2 transition">
-                    Sign out and try another account
+                  <button type="submit" className="w-full py-3 border border-stone text-navy text-xs font-semibold rounded hover:bg-ivory-2 transition">
+                    Sign out and try another owner account
                   </button>
                 </form>
               )}
@@ -105,6 +113,12 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
               <p className="text-[11px] text-text-3 text-center flex items-center justify-center space-x-1.5">
                 <ShieldCheck className="w-3.5 h-3.5 text-aplus-success" aria-hidden="true" />
                 <span>Google OAuth · owner allow-list · 30-minute idle timeout · audit-logged</span>
+              </p>
+              <p className="text-[11px] text-text-3 text-center">
+                Buying a suit?{' '}
+                <Link href="/auth/login" className="text-navy font-semibold hover:underline">
+                  Sign in as a customer
+                </Link>
               </p>
             </div>
           )}

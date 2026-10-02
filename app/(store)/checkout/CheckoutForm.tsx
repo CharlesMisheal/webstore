@@ -9,6 +9,7 @@ import { useStoreSettings } from '@/components/providers/StoreSettingsProvider';
 import { calculateTotal } from '@/lib/money';
 import { whatsappUrl } from '@/lib/whatsapp';
 import { ShieldCheck, Lock, ArrowRight, MessageCircle, AlertTriangle } from 'lucide-react';
+import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 
 const NIGERIAN_STATES = [
   'Lagos', 'Ogun', 'Abuja (FCT)', 'Oyo', 'Rivers', 'Edo', 'Delta', 'Kaduna', 'Kano', 'Enugu', 'Anambra', 'Akwa Ibom',
@@ -17,14 +18,14 @@ const NIGERIAN_STATES = [
 
 const inputClass = 'w-full px-3 py-2.5 bg-ivory-2 border border-stone rounded focus:ring-1 focus:ring-navy text-xs min-h-[44px]';
 
-export function CheckoutForm() {
+export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail?: string; signedInName?: string }) {
   const searchParams = useSearchParams();
   const { items, subtotalKobo, format } = useCart();
   const { delivery_rules: deliveryRules, contact } = useStoreSettings();
 
   const [deliveryOptionId, setDeliveryOptionId] = useState<string>('');
-  const [fullName, setFullName] = useState('');
-  const [email, setEmail] = useState('');
+  const [fullName, setFullName] = useState(signedInName ?? '');
+  const [email, setEmail] = useState(signedInEmail ?? '');
   const [phone, setPhone] = useState('');
   const [address, setAddress] = useState('');
   const [city, setCity] = useState('');
@@ -101,6 +102,23 @@ export function CheckoutForm() {
         <h1 className="font-serif text-3xl sm:text-4xl text-navy">Checkout</h1>
         <p className="text-xs text-text-3 mt-1">Enter your delivery details, then pay securely with Paystack. All charges are in Nigerian Naira.</p>
       </div>
+
+      {signedInEmail ? (
+        <p className="text-xs text-navy bg-ivory-2 border border-stone rounded px-4 py-3">
+          Signed in as <strong>{signedInEmail}</strong>. This order will appear under{' '}
+          <Link href="/account" className="underline font-semibold">My account</Link> so you can track it.
+        </p>
+      ) : (
+        <div className="bg-white border border-stone rounded-lg p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
+          <div className="flex-1 space-y-1">
+            <p className="text-sm font-semibold text-navy">Sign in to track this order</p>
+            <p className="text-xs text-text-3">Continue with Google so your receipt, status and measurements stay in your account. You can still check out as a guest.</p>
+          </div>
+          <div className="sm:w-64 shrink-0">
+            <GoogleSignInButton next="/checkout" />
+          </div>
+        </div>
+      )}
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8" noValidate>
         <div className="lg:col-span-7 space-y-6">

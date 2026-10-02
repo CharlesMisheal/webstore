@@ -1,0 +1,75 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --navy: #0E1B33;
+  --navy-2: #14254A;
+  --ink: #0A0F1A;
+  --gold: #B8923A;
+  --gold-light: #D4AF5A;
+  --gold-dark: #8A6A1F;
+  --ivory: #FAF7F0;
+  --ivory-2: #F2EDE2;
+  --stone: #E9E7E3;
+  --stone-border: #B7B2A5;
+  --text-main: #1B2230;
+  --text-muted: #4B5565;
+  --text-sub: #6B7280;
+}
+
+@layer base {
+  body {
+    background-color: #FAF7F0;
+    color: #1B2230;
+    font-family: var(--font-inter), system-ui, -apple-system, sans-serif;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: var(--font-playfair), Georgia, serif;
+    color: #0E1B33;
+    font-weight: 600;
+  }
+}
+
+/* Accessible focus ring */
+*:focus-visible {
+  outline: 2px solid #2B6CB0;
+  outline-offset: 2px;
+}
+
+/* Touch targets min 48px on mobile buttons */
+.touch-target {
+  min-height: 48px;
+  min-width: 48px;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-track {
+  background: #F2EDE2;
+}
+::-webkit-scrollbar-thumb {
+  background: #C9B79C;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #B8923A;
+}
+
+/* Print Invoice Styles */
+@media print {
+  body {
+    background: #ffffff !important;
+    color: #000000 !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}

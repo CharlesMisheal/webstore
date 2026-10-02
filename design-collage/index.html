@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>A-Plus Fashion Home — Design Collage</title>
+    <style>
+      :root {
+        --navy: #0e1b33;
+        --gold: #b8923a;
+        --ivory: #faf7f0;
+        --stone: #e9e7e3;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: linear-gradient(135deg, #f7f1e7 0%, #efe7d9 100%);
+        color: var(--navy);
+      }
+
+      .wrap {
+        max-width: 1500px;
+        margin: 0 auto;
+        padding: 32px 20px 80px;
+      }
+
+      .header {
+        text-align: center;
+        margin-bottom: 28px;
+      }
+
+      h1 {
+        margin: 0;
+        font-family: Georgia, serif;
+        font-size: clamp(2rem, 3vw, 3.5rem);
+        color: var(--navy);
+      }
+
+      .subtitle {
+        margin-top: 10px;
+        font-size: 0.95rem;
+        color: #4b5565;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+        gap: 20px;
+      }
+
+      .card {
+        background: rgba(255,255,255,0.5);
+        border: 1px solid rgba(14,27,51,0.12);
+        border-radius: 18px;
+        overflow: hidden;
+        box-shadow: 0 10px 28px rgba(14,27,51,0.08);
+      }
+
+      .card img {
+        display: block;
+        width: 100%;
+        height: 420px;
+        object-fit: cover;
+        background: #f3efe8;
+      }
+
+      .card .label {
+        padding: 12px 14px;
+        font-size: 0.85rem;
+        font-weight: 700;
+        background: rgba(250,247,240,0.9);
+        border-top: 1px solid rgba(14,27,51,0.08);
+      }
+
+      .wide {
+        grid-column: span 2;
+      }
+
+      .wide img {
+        height: 600px;
+      }
+
+      @media (max-width: 720px) {
+        .wide {
+          grid-column: auto;
+        }
+        .card img {
+          height: 320px;
+        }
+        .wide img {
+          height: 360px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <div class="header">
+        <h1>A-Plus Fashion Home</h1>
+        <div class="subtitle">All design assets kept in one place — originals remain in their folders.</div>
+      </div>
+
+      <div class="grid">
+        <div class="card wide">
+          <img src="../images/IMG_1627%20-%20Henry%20Abraham.jpeg" alt="Beige formal suit" />
+          <div class="label">Main formalwear product shot — beige suit</div>
+        </div>
+
+        <div class="card">
+          <img src="../images/IMG_1625%20-%20Henry%20Abraham.jpeg" alt="Purple tuxedo" />
+          <div class="label">Purple tuxedo suit</div>
+        </div>
+
+        <div class="card">
+          <img src="../images/54574C0C-1303-48B2-8BE5-E754F6B66C27%20-%20Henry%20Abraham.png" alt="Gold A-Plus logo design" />
+          <div class="label">A-Plus gold emblem / brand mockup</div>
+        </div>
+
+        <div class="card">
+          <img src="../images/A927B259-388F-41E6-842E-CBF6C6D6770F%20-%20Henry%20Abraham.png" alt="Men's suit styling board" />
+          <div class="label">Suit styling board</div>
+        </div>
+
+        <div class="card">
+          <img src="../images/F8C0F569-0314-4D5A-A765-B22C23B5D45C%20-%20Henry%20Abraham.png" alt="A-Plus luxury branding" />
+          <div class="label">Luxury branding concept</div>
+        </div>
+
+        <div class="card wide">
+          <img src="../aplus-1-docs-emails-wireframes/02-wireframes-1-storefront.png" alt="Storefront wireframe" />
+          <div class="label">Wireframe — storefront</div>
+        </div>
+
+        <div class="card">
+          <img src="../aplus-1-docs-emails-wireframes/02-wireframes-2-checkout-account.png" alt="Checkout and account wireframe" />
+          <div class="label">Wireframe — checkout and account</div>
+        </div>
+
+        <div class="card">
+          <img src="../aplus-1-docs-emails-wireframes/02-wireframes-3-services-info.png" alt="Services and info wireframe" />
+          <div class="label">Wireframe — services and info</div>
+        </div>
+
+        <div class="card">
+          <img src="../aplus-1-docs-emails-wireframes/02-wireframes-4-admin.png" alt="Admin wireframe" />
+          <div class="label">Wireframe — admin</div>
+        </div>
+
+        <div class="card">
+          <img src="../aplus-1-docs-emails-wireframes/08-style-guide.png" alt="Style guide" />
+          <div class="label">Style guide</div>
+        </div>
+
+        <div class="card">
+          <img src="../aplus-1-docs-emails-wireframes/09-trust-elements.png" alt="Trust elements design" />
+          <div class="label">Trust elements</div>
+        </div>
+      </div>
+    </div>
+  </body>
+</html>

@@ -9,7 +9,6 @@ import { useStoreSettings } from '@/components/providers/StoreSettingsProvider';
 import { calculateTotal } from '@/lib/money';
 import { whatsappUrl } from '@/lib/whatsapp';
 import { ShieldCheck, Lock, ArrowRight, MessageCircle, AlertTriangle } from 'lucide-react';
-import { GoogleSignInButton } from '@/components/auth/GoogleSignInButton';
 
 const NIGERIAN_STATES = [
   'Lagos', 'Ogun', 'Abuja (FCT)', 'Oyo', 'Rivers', 'Edo', 'Delta', 'Kaduna', 'Kano', 'Enugu', 'Anambra', 'Akwa Ibom',
@@ -18,7 +17,7 @@ const NIGERIAN_STATES = [
 
 const inputClass = 'w-full px-3 py-2.5 bg-ivory-2 border border-stone rounded focus:ring-1 focus:ring-navy text-xs min-h-[44px]';
 
-export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail?: string; signedInName?: string }) {
+export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail: string; signedInName: string }) {
   const searchParams = useSearchParams();
   const { items, subtotalKobo, format } = useCart();
   const { delivery_rules: deliveryRules, contact } = useStoreSettings();
@@ -83,6 +82,11 @@ export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail?: 
       });
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
+        if (data.code === 'SIGN_IN_REQUIRED') {
+          const next = `/checkout?del=${encodeURIComponent(deliveryRule.id)}`;
+          window.location.assign(`/auth/login?next=${encodeURIComponent(next)}`);
+          return;
+        }
         setError({ message: data.message || 'Payment could not be started.', code: data.code });
         setIsSubmitting(false);
         return;
@@ -103,22 +107,10 @@ export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail?: 
         <p className="text-xs text-text-3 mt-1">Enter your delivery details, then pay securely with Paystack. All charges are in Nigerian Naira.</p>
       </div>
 
-      {signedInEmail ? (
-        <p className="text-xs text-navy bg-ivory-2 border border-stone rounded px-4 py-3">
-          Signed in as <strong>{signedInEmail}</strong>. This order will appear under{' '}
-          <Link href="/account" className="underline font-semibold">My account</Link> so you can track it.
-        </p>
-      ) : (
-        <div className="bg-white border border-stone rounded-lg p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center gap-4">
-          <div className="flex-1 space-y-1">
-            <p className="text-sm font-semibold text-navy">Sign in to track this order</p>
-            <p className="text-xs text-text-3">Continue with Google so your receipt, status and measurements stay in your account. You can still check out as a guest.</p>
-          </div>
-          <div className="sm:w-64 shrink-0">
-            <GoogleSignInButton next="/checkout" />
-          </div>
-        </div>
-      )}
+      <p className="text-xs text-navy bg-ivory-2 border border-stone rounded px-4 py-3">
+        Signed in as <strong>{signedInEmail}</strong>. This order will appear under{' '}
+        <Link href="/account" className="underline font-semibold">My account</Link> so you can track it.
+      </p>
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8" noValidate>
         <div className="lg:col-span-7 space-y-6">
@@ -133,7 +125,7 @@ export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail?: 
               </div>
               <div>
                 <label htmlFor="email" className="block font-medium text-navy mb-1">Email *</label>
-                <input id="email" type="email" required autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="name@example.com" className={inputClass} />
+                <input id="email" type="email" required autoComplete="email" value={email} readOnly className={`${inputClass} bg-stone/40 cursor-not-allowed`} />
               </div>
               <div>
                 <label htmlFor="phone" className="block font-medium text-navy mb-1">Phone / WhatsApp *</label>

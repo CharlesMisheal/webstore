@@ -76,10 +76,14 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const [settings, variants, user] = await Promise.all([
+    const user = await getCurrentUser();
+    if (!user) {
+      return NextResponse.json({ message: 'Sign in with Google to check out.', code: 'SIGN_IN_REQUIRED' }, { status: 401 });
+    }
+
+    const [settings, variants] = await Promise.all([
       getStoreSettings(),
       getVariantsByIds(Array.from(new Set(body.items.map((i) => i.variant_id)))),
-      getCurrentUser(),
     ]);
 
     const draft = buildOrderDraft({
@@ -92,9 +96,9 @@ export async function POST(req: NextRequest) {
     const orderNumber = await uniqueOrderNumber();
     const order = await createOrder({
       order_number: orderNumber,
-      user_id: user?.id ?? null,
+      user_id: user.id,
       customer_name: body.customer.fullName,
-      customer_email: body.customer.email.toLowerCase(),
+      customer_email: user.email,
       customer_phone: body.customer.phone,
       subtotal_kobo: draft.subtotal_kobo,
       delivery_fee_kobo: draft.delivery_fee_kobo,

@@ -62,7 +62,9 @@ export default async function AdminLoginPage({ searchParams }: AdminLoginPagePro
 
           {oauthError && (
             <div className="p-3 bg-red-50 border border-red-200 rounded text-xs text-aplus-error" role="alert">
-              Google sign-in could not be completed ({oauthError}). Please try again.
+              {oauthError === 'session'
+                ? 'We could not verify your session (the server may be misconfigured or Supabase unreachable). Please sign in again.'
+                : `Google sign-in could not be completed (${oauthError}). Please try again.`}
             </div>
           )}
 

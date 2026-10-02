@@ -3,8 +3,10 @@ import { createServerClient, type CookieOptions } from '@supabase/ssr';
 
 type CookieToSet = { name: string; value: string; options?: CookieOptions };
 
-const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL ?? '';
-const SUPABASE_ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '';
+// Trim: values pasted into hosting dashboards often carry a trailing space/newline,
+// which makes `new URL()` inside the Supabase client throw and 500s every request.
+const SUPABASE_URL = (process.env.NEXT_PUBLIC_SUPABASE_URL ?? '').trim().replace(/^["']|["']$/g, '');
+const SUPABASE_ANON_KEY = (process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? '').trim().replace(/^["']|["']$/g, '');
 
 const ADMIN_IDLE_MS = 30 * 60 * 1000;
 const ADMIN_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
@@ -23,10 +25,29 @@ const cookieOpts = {
  * 2. UX-only redirects: unauthenticated /admin/* -> /admin/login, /account -> /auth/login.
  *    The real gate is requireAdmin() inside every admin page/action/route.
  * 3. Slides the 30-minute admin idle timer on each admin navigation.
+ *
+ * Fails open: if anything here throws (bad env value, Supabase unreachable), the
+ * request proceeds without a session refresh. Security does not depend on this
+ * file — requireAdmin() runs in every admin layout/action/route.
  */
 export async function middleware(request: NextRequest) {
   if (!SUPABASE_URL || !SUPABASE_ANON_KEY) return NextResponse.next();
+  try {
+    return await handle(request);
+  } catch (err) {
+    console.error('[middleware] failed open:', err instanceof Error ? err.message : err);
+    const { pathname } = request.nextUrl;
+    if (pathname.startsWith('/admin') && pathname !== '/admin/login') {
+      const url = request.nextUrl.clone();
+      url.pathname = '/admin/login';
+      url.search = '?error=session';
+      return NextResponse.redirect(url);
+    }
+    return NextResponse.next();
+  }
+}
 
+async function handle(request: NextRequest) {
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {

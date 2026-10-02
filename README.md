@@ -4,7 +4,7 @@ Bespoke and ready-to-wear formal menswear from Ijebu-Ode, Nigeria. Customers bro
 
 **Stack:** Next.js 14 (App Router, TypeScript strict) · Tailwind · Supabase (Postgres, Auth, RLS) · Paystack · Mailgun · Vitest.
 
-Design brief, wireframes and email designs live in `aplus-1-docs-emails-wireframes/`; engineering rules in `aplus-agent.md`; architecture decisions in `DECISIONS.md`.
+Engineering rules are in `aplus-agent.md`; architecture decisions in `DECISIONS.md`. The design pack (wireframes, hi-fi screens, style guide, email designs) and raw client photos are kept outside the repo; the three email templates it produced are checked in under `emails/`.
 
 ---
 

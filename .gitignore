@@ -29,3 +29,13 @@ Thumbs.db
 
 # TypeScript
 *.tsbuildinfo
+
+# Design pack and raw client photos live outside the repo (Drive). The site reads from public/images only.
+aplus-1-docs-emails-wireframes/
+aplus-2-mobile-screens/
+aplus-3-desktop-screens/
+aplus-4-admin-desktop/
+aplus-5-admin-mobile/
+admin-mobile-screens/
+design-collage/
+/images/

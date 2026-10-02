@@ -1,8 +1,11 @@
 import React from 'react';
 import Link from 'next/link';
 import { ShieldCheck, RefreshCw, Scissors, MessageCircle } from 'lucide-react';
+import { getStoreSettings } from '@/lib/db';
+import { formatPhoneDisplay, whatsappUrl } from '@/lib/whatsapp';
 
-export default function ReturnPolicyPage() {
+export default async function ReturnPolicyPage() {
+  const { contact } = await getStoreSettings();
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-16 space-y-10">
       <div className="text-center space-y-3">
@@ -55,8 +58,8 @@ export default function ReturnPolicyPage() {
         <section className="bg-ivory-2 p-5 rounded border border-stone space-y-2">
           <h3 className="font-bold text-navy text-sm">How to Request an Alteration</h3>
           <p>
-            1. Send a clear photo of you wearing the garment to master tailor Henry Abraham on WhatsApp at <strong>+234 707 137 4515</strong>.<br />
-            2. We will analyze the fit, agree on the exact adjustments needed, and dispatch a courier or receive the garment at 2 Jagunmolu Street, Ondo Road, Ijebu-Ode.<br />
+            1. Send a clear photo of you wearing the garment to master tailor Henry Abraham on WhatsApp at <strong>{formatPhoneDisplay(contact.whatsapp)}</strong>.<br />
+            2. We will analyze the fit, agree on the exact adjustments needed, and dispatch a courier or receive the garment at {contact.address}.<br />
             3. Turnaround time for adjustments is typically 2–4 business days.
           </p>
         </section>
@@ -64,7 +67,7 @@ export default function ReturnPolicyPage() {
 
       <div className="text-center">
         <a
-          href="https://wa.me/2347071374515?text=Hello%20Henry%2C%20I%20have%20an%20alteration%20request%20for%20my%20order."
+          href={whatsappUrl(contact.whatsapp, 'Hello Henry, I have an alteration request for my order.')}
           target="_blank"
           rel="noopener noreferrer"
           className="inline-flex items-center space-x-2 px-6 py-3.5 bg-[#25D366] hover:bg-[#1EBE5D] text-white font-semibold text-xs rounded transition shadow"

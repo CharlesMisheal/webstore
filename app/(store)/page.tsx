@@ -1,16 +1,19 @@
 import React from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
-import { getCategories, getProducts, getReviews } from '@/lib/db';
+import { getCategories, getProducts, getReviews, getStoreSettings } from '@/lib/db';
+import { formatPhoneDisplay, whatsappUrl } from '@/lib/whatsapp';
 import { ProductCard } from '@/components/product/ProductCard';
 import { ArrowRight, Sparkles, ShieldCheck, Truck, MessageCircle, Star, Scissors, CheckCircle, Calendar } from 'lucide-react';
 
 export default async function HomePage() {
-  const [categories, featuredProducts, reviews] = await Promise.all([
+  const [categories, featuredProducts, reviews, settings] = await Promise.all([
     getCategories(),
     getProducts({ featuredOnly: true }),
     getReviews(undefined, true),
+    getStoreSettings(),
   ]);
+  const { contact } = settings;
 
   return (
     <div className="space-y-16 sm:space-y-24 pb-16">
@@ -19,7 +22,7 @@ export default async function HomePage() {
         {/* Background Image with High Quality Sartorial Texture */}
         <div className="absolute inset-0 z-0 opacity-30 mix-blend-luminosity">
           <Image
-            src="/images/IMG_1627.jpeg"
+            src="/images/feature-suit-ivory.jpg"
             alt="A-Plus Tailored Suit Background"
             fill
             priority
@@ -34,7 +37,7 @@ export default async function HomePage() {
           <div className="max-w-2xl space-y-5 sm:space-y-6">
             <div className="inline-flex items-center gap-2 sm:gap-3 px-2.5 sm:px-3 py-1.5 sm:py-2 rounded bg-navy-2/90 border border-gold/40 text-gold-light text-[10px] sm:text-xs tracking-wider uppercase shadow-lg">
               <div className="relative h-7 w-7 sm:h-8 sm:w-8 overflow-hidden rounded-full border border-gold/50 bg-ivory/10 shrink-0">
-                <Image src="/images/brand-1.png" alt="A-Plus Fashion Home logo" fill className="object-cover" />
+                <Image src="/images/logo.png" alt="A-Plus Fashion Home logo" fill className="object-cover" />
               </div>
               <div className="flex items-center gap-1.5 sm:gap-2 min-w-0">
                 <Sparkles className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-gold shrink-0" />
@@ -110,7 +113,7 @@ export default async function HomePage() {
             </div>
             <div>
               <h4 className="text-xs font-bold text-navy uppercase tracking-wider">Direct WhatsApp</h4>
-              <p className="text-xs text-text-3 mt-0.5">+234 707 137 4515</p>
+              <p className="text-xs text-text-3 mt-0.5">{formatPhoneDisplay(contact.whatsapp)}</p>
             </div>
           </div>
         </div>
@@ -121,7 +124,7 @@ export default async function HomePage() {
         <div className="grid gap-6 lg:grid-cols-[1.3fr_0.7fr]">
           <div className="relative overflow-hidden rounded-2xl border border-stone bg-white shadow-card min-h-[440px]">
             <Image
-              src="/images/IMG_1625.jpeg"
+              src="/images/feature-suit-purple.jpg"
               alt="Purple bespoke suit editorial"
               fill
               priority
@@ -137,7 +140,7 @@ export default async function HomePage() {
           <div className="grid gap-6">
             <div className="relative overflow-hidden rounded-2xl border border-stone bg-white shadow-card min-h-[210px]">
               <Image
-                src="/images/IMG_1627.jpeg"
+                src="/images/feature-suit-ivory.jpg"
                 alt="Ivory bespoke suit editorial"
                 fill
                 className="object-cover"
@@ -395,9 +398,9 @@ export default async function HomePage() {
             </p>
 
             <div className="pt-2 text-xs space-y-2 text-stone">
-              <p>📍 <strong>Address:</strong> 2 Jagunmolu Street, Ondo Road, Ijebu-Ode, Ogun State</p>
-              <p>🕒 <strong>Hours:</strong> Monday – Saturday: 9:00 AM – 6:00 PM</p>
-              <p>💬 <strong>Direct WhatsApp:</strong> +234 707 137 4515</p>
+              <p>📍 <strong>Address:</strong> {contact.address}</p>
+              <p>🕒 <strong>Hours:</strong> {contact.hours}</p>
+              <p>💬 <strong>Direct WhatsApp:</strong> {formatPhoneDisplay(contact.whatsapp)}</p>
             </div>
 
             <div className="pt-4 flex flex-wrap gap-4">
@@ -408,7 +411,7 @@ export default async function HomePage() {
                 Book Your Shop Appointment
               </Link>
               <a
-                href="https://wa.me/2347071374515?text=Hello%20Henry%2C%20I%20would%20like%20to%20visit%20the%20Ijebu-Ode%20workshop."
+                href={whatsappUrl(contact.whatsapp, 'Hello Henry, I would like to visit the Ijebu-Ode workshop.')}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="px-6 py-3 bg-navy-2 hover:bg-navy text-gold-light border border-gold/40 font-semibold text-xs rounded transition flex items-center space-x-1.5"

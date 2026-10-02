@@ -1,6 +1,14 @@
 -- Seed Data for A-Plus Fashion Home
+--
+-- Safe to re-run: every statement upserts on its primary key. Re-running refreshes
+-- demo catalogue content but never touches orders, payments, quotes, bookings or
+-- customer data. Run AFTER both migrations in supabase/migrations/.
+--
+-- Images: the two client photos live in /public/images (feature-suit-ivory.jpg,
+-- feature-suit-purple.jpg). Remaining demo products use Unsplash placeholders
+-- until the owner uploads real photos from the admin panel.
 
--- 1. ADMINS
+-- 1. ADMINS (must also be listed in ADMIN_EMAILS env var — both checks are required)
 insert into public.admins (email, added_by) values
 ('henryaplus82@gmail.com', 'system_init')
 on conflict (email) do nothing;
@@ -12,7 +20,7 @@ insert into public.categories (id, name, slug, description, image_path, sort_ord
 ('cat_tuxedos', 'Tuxedos', 'tuxedos', 'Impeccable black tie and red carpet tuxedos with satin lapels and hand-finished accents.', 'https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?auto=format&fit=crop&w=800&q=80', 3, true),
 ('cat_shirts', 'Shirts', 'shirts', 'Crisp Egyptian and Italian cotton dress shirts crafted for peak comfort and breathability.', 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=800&q=80', 4, true),
 ('cat_pants', 'Pants', 'pants', 'Hand-tailored formal trousers with side adjusters and sharp front creases.', 'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=800&q=80', 5, true)
-on conflict (id) do nothing;
+on conflict (id) do update set name = excluded.name, slug = excluded.slug, description = excluded.description, image_path = excluded.image_path, sort_order = excluded.sort_order;
 
 -- 3. PRODUCTS
 insert into public.products (id, category_id, name, slug, description, price_kobo, is_bespoke, is_featured, is_visible) values
@@ -24,7 +32,7 @@ insert into public.products (id, category_id, name, slug, description, price_kob
 ('prod_ivory_groom_suit', 'cat_suits', 'Ivory Double-Breasted Groom Suit', 'ivory-double-breasted-groom-suit', 'Ethereal ivory white double-breasted suit designed for the distinguished groom. Gold embossed buttons and custom monogrammed lining available on request.', 19500000, true, true, true),
 ('prod_egyptian_shirt', 'cat_shirts', 'Egyptian Cotton French Cuff Shirt', 'egyptian-cotton-french-cuff-shirt', 'Pure 100% long-staple Egyptian cotton shirt with structured spread collar and double French cuffs. Built to stay crisp all day in Nigerian weather.', 3500000, false, false, true),
 ('prod_charcoal_trousers', 'cat_pants', 'Charcoal Bespoke Pleated Trousers', 'charcoal-bespoke-pleated-trousers', 'Refined charcoal grey trousers with single forward pleats, functional side cinch adjusters, and a clean 2-inch cuff.', 4500000, false, false, true)
-on conflict (id) do nothing;
+on conflict (id) do update set name = excluded.name, slug = excluded.slug, description = excluded.description, price_kobo = excluded.price_kobo, is_bespoke = excluded.is_bespoke, is_featured = excluded.is_featured;
 
 -- 4. PRODUCT IMAGES
 insert into public.product_images (id, product_id, storage_path, alt, sort_order, is_cover) values
@@ -32,12 +40,12 @@ insert into public.product_images (id, product_id, storage_path, alt, sort_order
 ('img_crystal_2', 'prod_crystal_three_piece', 'https://images.unsplash.com/photo-1593030761757-71fae45fa0e7?auto=format&fit=crop&w=800&q=80', 'Crystal lapel detail', 2, false),
 ('img_navy_1', 'prod_navy_executive', 'https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=800&q=80', 'Navy Executive Three-Piece front view', 1, true),
 ('img_two_tone_1', 'prod_modern_two_tone', 'https://images.unsplash.com/photo-1617137984095-74e4e5e3613f?auto=format&fit=crop&w=800&q=80', 'Modern Two-Tone Blazer', 1, true),
-('img_purple_1', 'prod_royal_purple_tux', 'https://images.unsplash.com/photo-1598808503746-f34c53b9323e?auto=format&fit=crop&w=800&q=80', 'Royal Purple Tuxedo Set', 1, true),
+('img_purple_1', 'prod_royal_purple_tux', '/images/feature-suit-purple.jpg', 'Royal Purple Tuxedo Set', 1, true),
 ('img_emerald_1', 'prod_emerald_velvet', 'https://images.unsplash.com/photo-1555069519-127aadedf1ee?auto=format&fit=crop&w=800&q=80', 'Emerald Velvet Dinner Jacket', 1, true),
-('img_ivory_1', 'prod_ivory_groom_suit', 'https://images.unsplash.com/photo-1550246140-5119ae4790b8?auto=format&fit=crop&w=800&q=80', 'Ivory Double-Breasted Groom Suit', 1, true),
+('img_ivory_1', 'prod_ivory_groom_suit', '/images/feature-suit-ivory.jpg', 'Ivory Double-Breasted Groom Suit', 1, true),
 ('img_shirt_1', 'prod_egyptian_shirt', 'https://images.unsplash.com/photo-1602810318383-e386cc2a3ccf?auto=format&fit=crop&w=800&q=80', 'Crisp White French Cuff Shirt', 1, true),
 ('img_pants_1', 'prod_charcoal_trousers', 'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=800&q=80', 'Charcoal Bespoke Pleated Trousers', 1, true)
-on conflict (id) do nothing;
+on conflict (id) do update set storage_path = excluded.storage_path, alt = excluded.alt, sort_order = excluded.sort_order, is_cover = excluded.is_cover;
 
 -- 5. PRODUCT VARIANTS
 insert into public.product_variants (id, product_id, size_label, sku, stock) values
@@ -79,7 +87,7 @@ insert into public.product_variants (id, product_id, size_label, sku, stock) val
 ('var_pnt_32', 'prod_charcoal_trousers', '32 Waist', 'APF-PNT-32', 12),
 ('var_pnt_34', 'prod_charcoal_trousers', '34 Waist', 'APF-PNT-34', 15),
 ('var_pnt_36', 'prod_charcoal_trousers', '36 Waist', 'APF-PNT-36', 10)
-on conflict (id) do nothing;
+on conflict (id) do update set size_label = excluded.size_label, sku = excluded.sku;
 
 -- 6. REVIEWS
 insert into public.reviews (id, product_id, author_name, author_location, rating, body, status) values
@@ -100,14 +108,14 @@ insert into public.store_settings (key, value) values
     "cta_href": "/shop",
     "secondary_label": "Request a quote",
     "secondary_href": "/quote",
-    "image_path": "https://images.unsplash.com/photo-1507679799987-c73779587ccf?auto=format&fit=crop&w=1600&q=85",
+    "image_path": "/images/feature-suit-ivory.jpg",
     "visible": true,
     "sort_order": 1
   }
 ]'::jsonb),
 ('about', '{
   "headline": "Crafting Sartorial Distinction in Ijebu-Ode",
-  "story_html": "Founded by master tailor Henry Abraham, A-Plus Fashion Home combines traditional British tailoring finesse with vibrant Nigerian flair. For over 5 years, we have outfitted grooms, executives, and international connoisseurs who refuse to compromise on fit, fabric, or finish.",
+  "story_html": "<p>Founded by master tailor Henry Abraham, A-Plus Fashion Home combines traditional British tailoring finesse with vibrant Nigerian flair. For over 5 years, we have outfitted grooms, executives, and international connoisseurs who refuse to compromise on fit, fabric, or finish.</p>",
   "years": 5,
   "product_count": "100+",
   "happy_clients": "1,200+"
@@ -136,4 +144,5 @@ insert into public.store_settings (key, value) values
   {"id": "del_pickup", "label": "Shop Pick-up (2 Jagunmolu St, Ijebu-Ode)", "fee_kobo": 0, "eta": "Ready within 24 hours"},
   {"id": "del_intl", "label": "International Express (DHL Worldwide)", "fee_kobo": 4500000, "eta": "5–8 business days"}
 ]'::jsonb)
-on conflict (key) do update set value = excluded.value;
+-- Never overwrite settings the owner has already published from the admin panel.
+on conflict (key) do nothing;

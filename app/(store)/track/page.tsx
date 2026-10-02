@@ -1,7 +1,8 @@
 import React from 'react';
 import Link from 'next/link';
-import { getOrderByNumber } from '@/lib/db';
+import { getOrderByNumber, getStoreSettings } from '@/lib/db';
 import { formatNaira } from '@/lib/money';
+import { whatsappUrl } from '@/lib/whatsapp';
 import { Search, CheckCircle2, Circle, Clock, Truck, Package, MessageCircle, ExternalLink } from 'lucide-react';
 
 interface TrackPageProps {
@@ -12,7 +13,7 @@ interface TrackPageProps {
 
 export default async function OrderTrackingPage({ searchParams }: TrackPageProps) {
   const orderNumber = searchParams.order?.trim();
-  const order = orderNumber ? await getOrderByNumber(orderNumber) : null;
+  const [order, settings] = await Promise.all([orderNumber ? getOrderByNumber(orderNumber) : Promise.resolve(null), getStoreSettings()]);
 
   const steps = [
     { key: 'placed', label: 'Order Placed', desc: 'Received by tailoring desk' },
@@ -71,7 +72,7 @@ export default async function OrderTrackingPage({ searchParams }: TrackPageProps
           <p className="font-serif text-lg text-navy">No order found with number &ldquo;{orderNumber}&rdquo;</p>
           <p className="text-xs text-text-3">Please check the confirmation email or WhatsApp receipt sent to you.</p>
           <a
-            href="https://wa.me/2347071374515?text=Hello%20Henry%2C%20could%20you%20help%20me%20find%20my%20order%20status%3F"
+            href={whatsappUrl(settings.contact.whatsapp, `Hello Henry, could you help me find my order status? I searched for "${orderNumber}".`)}
             target="_blank"
             rel="noopener noreferrer"
             className="inline-flex items-center space-x-2 text-xs font-semibold text-emerald-700 hover:underline pt-2"

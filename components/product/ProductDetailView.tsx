@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
-import { Product, ProductVariant, FitType } from '@/lib/types';
-import { formatMoney } from '@/lib/money';
+import { Product, ProductVariant, FitType, Review } from '@/lib/types';
 import { useCart } from '../cart/CartContext';
+import { useStoreSettings } from '../providers/StoreSettingsProvider';
+import { whatsappUrl } from '@/lib/whatsapp';
 import { SizeGuideModal } from '../ui/SizeGuideModal';
 import {
   ShoppingBag,
@@ -23,25 +24,35 @@ import {
 interface ProductDetailViewProps {
   product: Product;
   relatedProducts: Product[];
+  reviews?: Review[];
 }
 
-export function ProductDetailView({ product, relatedProducts }: ProductDetailViewProps) {
-  const { addItem, currency } = useCart();
+export function ProductDetailView({ product, relatedProducts, reviews = [] }: ProductDetailViewProps) {
+  const { addItem, format } = useCart();
+  const { contact, delivery_rules: deliveryRules } = useStoreSettings();
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
-  const [selectedVariant, setSelectedVariant] = useState<ProductVariant>(
-    product.variants[0] || { id: 'default', product_id: product.id, size_label: '40R', stock: 5 }
+  const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(
+    product.variants.find((v) => v.stock > 0) || product.variants[0] || null
   );
-  const [fitType, setFitType] = useState<FitType>('ready_to_wear');
+  const [fitType, setFitType] = useState<FitType>(product.variants.some((v) => v.stock > 0) || !product.is_bespoke ? 'ready_to_wear' : 'bespoke');
   const [quantity, setQuantity] = useState(1);
   const [isSizeGuideOpen, setIsSizeGuideOpen] = useState(false);
   const [activeAccordion, setActiveAccordion] = useState<string | null>('fabric');
   const [addedToast, setAddedToast] = useState(false);
+  const [addError, setAddError] = useState('');
 
   // Review submission state
   const [reviewerName, setReviewerName] = useState('');
+  const [reviewerLocation, setReviewerLocation] = useState('');
   const [reviewerRating, setReviewerRating] = useState(5);
   const [reviewText, setReviewText] = useState('');
   const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+  const [reviewError, setReviewError] = useState('');
+
+  const avgRating = reviews.length ? reviews.reduce((s, r) => s + r.rating, 0) / reviews.length : null;
+  const outOfStock = fitType === 'ready_to_wear' && (!selectedVariant || selectedVariant.stock <= 0);
+  const maxQty = fitType === 'ready_to_wear' && selectedVariant ? Math.max(1, Math.min(10, selectedVariant.stock)) : 10;
 
   const images = product.images.length > 0 ? product.images : [
     {
@@ -57,6 +68,15 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
   const currentImage = images[selectedImageIdx] || images[0];
 
   const handleAddToCart = () => {
+    setAddError('');
+    if (!selectedVariant) {
+      setAddError('Please select a size.');
+      return;
+    }
+    if (outOfStock) {
+      setAddError(`Size ${selectedVariant.size_label} is sold out ready-to-wear${product.is_bespoke ? ' — choose Custom Bespoke to have it made for you.' : '.'}`);
+      return;
+    }
     addItem({
       product_id: product.id,
       variant_id: selectedVariant.id,
@@ -64,7 +84,7 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
       size_label: selectedVariant.size_label,
       fit_type: fitType,
       unit_price_kobo: product.price_kobo,
-      qty: quantity,
+      qty: Math.min(quantity, maxQty),
       image_url: currentImage.storage_path,
       slug: product.slug,
     });
@@ -72,15 +92,37 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
     setTimeout(() => setAddedToast(false), 3000);
   };
 
-  // WhatsApp order link prefill
-  const productUrl = typeof window !== 'undefined' ? window.location.href : `https://aplusfashion.ng/product/${product.slug}`;
-  const whatsappMessage = `Hello Henry, I want to order the "${product.name}" in Size ${selectedVariant.size_label} (${fitType === 'bespoke' ? 'Bespoke Made-to-Measure' : 'Ready-to-Wear'}). Link: ${productUrl}`;
-  const whatsappOrderUrl = `https://wa.me/2347071374515?text=${encodeURIComponent(whatsappMessage)}`;
+  // WhatsApp order link prefill (number comes from store settings)
+  const productPath = `/product/${product.slug}`;
+  const whatsappMessage = `Hello Henry, I want to order the "${product.name}"${selectedVariant ? ` in size ${selectedVariant.size_label}` : ''} (${fitType === 'bespoke' ? 'Bespoke made-to-measure' : 'Ready to wear'}). Link: ${process.env.NEXT_PUBLIC_SITE_URL || ''}${productPath}`;
+  const whatsappOrderUrl = whatsappUrl(contact.whatsapp, whatsappMessage);
 
-  const handleReviewSubmit = (e: React.FormEvent) => {
+  const handleReviewSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (reviewerName.trim() && reviewText.trim()) {
+    setReviewError('');
+    setReviewSubmitting(true);
+    try {
+      const res = await fetch('/api/reviews', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: product.id,
+          author_name: reviewerName,
+          author_location: reviewerLocation,
+          rating: reviewerRating,
+          body: reviewText,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setReviewError(data.message || 'We could not submit your review. Please try again.');
+        return;
+      }
       setReviewSubmitted(true);
+    } catch {
+      setReviewError('Network error. Please try again.');
+    } finally {
+      setReviewSubmitting(false);
     }
   };
 
@@ -157,11 +199,11 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
             {/* Price Display */}
             <div className="mt-3 flex items-baseline space-x-3">
               <span className="font-serif text-2xl sm:text-3xl font-bold text-navy">
-                {formatMoney(product.price_kobo, currency)}
+                {format(product.price_kobo)}
               </span>
-              <span className="text-xs text-text-3">
-                (Integer kobo verified: ₦{(product.price_kobo / 100).toLocaleString('en-NG')})
-              </span>
+              {product.is_bespoke && (
+                <span className="text-xs text-text-3">Made-to-measure available</span>
+              )}
             </div>
           </div>
 
@@ -195,7 +237,9 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
               <button
                 type="button"
                 onClick={() => setFitType('bespoke')}
-                className={`p-3 rounded border text-left text-xs transition ${
+                disabled={!product.is_bespoke}
+                title={product.is_bespoke ? undefined : 'This piece is ready-to-wear only'}
+                className={`p-3 rounded border text-left text-xs transition disabled:opacity-50 disabled:cursor-not-allowed ${
                   fitType === 'bespoke'
                     ? 'border-navy bg-navy text-ivory shadow-sm'
                     : 'border-stone bg-white text-text hover:border-gold'
@@ -228,28 +272,45 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
               </button>
             </div>
 
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-3 sm:grid-cols-4 gap-2" role="radiogroup" aria-label="Size">
               {product.variants.map((v) => {
-                const isSelected = selectedVariant.id === v.id;
+                const isSelected = selectedVariant?.id === v.id;
+                const soldOut = fitType === 'ready_to_wear' && v.stock <= 0;
                 return (
                   <button
                     key={v.id}
                     type="button"
-                    onClick={() => setSelectedVariant(v)}
-                    className={`py-2 px-3 text-xs font-medium rounded border transition ${
+                    role="radio"
+                    aria-checked={isSelected}
+                    onClick={() => {
+                      setSelectedVariant(v);
+                      setQuantity(1);
+                    }}
+                    className={`relative py-2 px-3 text-xs font-medium rounded border transition ${
                       isSelected
                         ? 'border-navy bg-navy text-ivory font-semibold shadow-sm'
-                        : 'border-stone bg-white text-navy hover:border-gold'
+                        : soldOut
+                          ? 'border-stone bg-ivory-2 text-text-3 line-through'
+                          : 'border-stone bg-white text-navy hover:border-gold'
                     }`}
+                    title={soldOut ? 'Sold out ready-to-wear' : undefined}
                   >
                     {v.size_label}
                   </button>
                 );
               })}
             </div>
-            {selectedVariant.stock <= 3 && selectedVariant.stock > 0 && (
-              <p className="text-[11px] text-aplus-warning font-medium">
-                Low stock: Only {selectedVariant.stock} left in size {selectedVariant.size_label}
+            {product.variants.length === 0 && (
+              <p className="text-[11px] text-text-3">Sizing is confirmed at your fitting — request a quote or order via WhatsApp.</p>
+            )}
+            {selectedVariant && fitType === 'ready_to_wear' && selectedVariant.stock <= 3 && selectedVariant.stock > 0 && (
+              <p className="text-[11px] text-aplus-warning font-medium" aria-live="polite">
+                Low stock: only {selectedVariant.stock} left in size {selectedVariant.size_label}
+              </p>
+            )}
+            {selectedVariant && outOfStock && (
+              <p className="text-[11px] text-aplus-error font-medium" aria-live="polite">
+                Size {selectedVariant.size_label} is sold out ready-to-wear{product.is_bespoke ? ' — available made-to-measure.' : '.'}
               </p>
             )}
           </div>
@@ -269,10 +330,10 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
                 >
                   -
                 </button>
-                <span className="px-4 text-xs font-semibold text-navy">{quantity}</span>
+                <span className="px-4 text-xs font-semibold text-navy" aria-live="polite">{quantity}</span>
                 <button
                   type="button"
-                  onClick={() => setQuantity((q) => Math.min(10, q + 1))}
+                  onClick={() => setQuantity((q) => Math.min(maxQty, q + 1))}
                   className="px-3 py-1.5 text-text hover:bg-ivory-2 transition text-sm"
                   aria-label="Increase quantity"
                 >
@@ -287,17 +348,26 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
             <button
               type="button"
               onClick={handleAddToCart}
-              className="w-full py-4 bg-navy hover:bg-navy-2 text-ivory font-semibold text-sm rounded shadow-lg transition flex items-center justify-center space-x-2 touch-target"
+              disabled={outOfStock && !product.is_bespoke}
+              className="w-full py-4 bg-navy hover:bg-navy-2 disabled:opacity-60 disabled:cursor-not-allowed text-ivory font-semibold text-sm rounded shadow-lg transition flex items-center justify-center space-x-2 touch-target"
             >
-              <ShoppingBag className="w-5 h-5 text-gold-light" />
-              <span>Add to Shopping Bag • {formatMoney(product.price_kobo * quantity, currency)}</span>
+              <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
+              <span>{outOfStock && !product.is_bespoke ? 'Sold out' : `Add to bag • ${format(product.price_kobo * quantity)}`}</span>
             </button>
 
             {addedToast && (
-              <div className="p-3 bg-emerald-50 border border-emerald-200 text-aplus-success text-xs font-medium rounded flex items-center space-x-2 animate-in fade-in">
-                <Check className="w-4 h-4" />
-                <span>Added to your bag! View bag to proceed to checkout.</span>
+              <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-aplus-success text-xs font-medium rounded flex items-center justify-between animate-in fade-in">
+                <span className="flex items-center space-x-2">
+                  <Check className="w-4 h-4" aria-hidden="true" />
+                  <span>Added to your bag.</span>
+                </span>
+                <Link href="/cart" className="underline font-semibold">View bag</Link>
               </div>
+            )}
+            {addError && (
+              <p role="alert" className="p-3 bg-red-50 border border-red-200 text-aplus-error text-xs rounded">
+                {addError}
+              </p>
             )}
 
             <a
@@ -328,7 +398,14 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
             </div>
             <div className="flex items-center space-x-2">
               <Truck className="w-4 h-4 text-gold-dark flex-shrink-0" />
-              <span><strong>Fast Dispatch:</strong> Lagos/Ogun (1–3 days) • Nationwide (3–5 days).</span>
+              <span>
+                <strong>Delivery:</strong>{' '}
+                {deliveryRules
+                  .filter((r) => r.fee_kobo > 0)
+                  .slice(0, 2)
+                  .map((r) => `${r.label.split('(')[0].trim()} (${r.eta})`)
+                  .join(' • ')}
+              </span>
             </div>
           </div>
 
@@ -367,7 +444,7 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
               {activeAccordion === 'delivery' && (
                 <div className="pb-3 text-text-3 space-y-1.5">
                   <p>• Courier delivery across Nigeria with tracking link provided upon dispatch.</p>
-                  <p>• Pick-up available at our workshop in 2 Jagunmolu St, Ondo Road, Ijebu-Ode.</p>
+                  <p>• Pick-up available at our workshop: {contact.address}.</p>
                   <p>• 14-day alteration window for minor adjustments to ensure bespoke perfection.</p>
                 </div>
               )}
@@ -387,67 +464,120 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
               Reviews for this Garment
             </h3>
           </div>
-          <div className="flex items-center space-x-2 text-sm text-text-2">
-            <div className="flex text-gold-dark">
-              {[...Array(5)].map((_, i) => (
-                <Star key={i} className="w-4 h-4 fill-current" />
-              ))}
+          {avgRating !== null ? (
+            <div className="flex items-center space-x-2 text-sm text-text-2">
+              <div className="flex text-gold-dark" aria-hidden="true">
+                {[...Array(5)].map((_, i) => (
+                  <Star key={i} className={`w-4 h-4 ${i < Math.round(avgRating) ? 'fill-current' : ''}`} />
+                ))}
+              </div>
+              <span className="font-bold text-navy">{avgRating.toFixed(1)} / 5</span>
+              <span className="text-xs text-text-3">({reviews.length} {reviews.length === 1 ? 'review' : 'reviews'})</span>
             </div>
-            <span className="font-bold text-navy">5.0 / 5.0</span>
-            <span className="text-xs text-text-3">(Verified Buyers)</span>
-          </div>
+          ) : (
+            <span className="text-xs text-text-3">No reviews yet — be the first.</span>
+          )}
         </div>
+
+        {reviews.length > 0 && (
+          <ul className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {reviews.map((r) => (
+              <li key={r.id} className="bg-white p-5 rounded border border-stone space-y-2 text-xs">
+                <div className="flex items-center justify-between">
+                  <div className="flex text-gold-dark" aria-label={`${r.rating} out of 5 stars`}>
+                    {[...Array(5)].map((_, i) => (
+                      <Star key={i} className={`w-3.5 h-3.5 ${i < r.rating ? 'fill-current' : ''}`} aria-hidden="true" />
+                    ))}
+                  </div>
+                  <time dateTime={r.created_at} className="text-text-3">
+                    {new Date(r.created_at).toLocaleDateString('en-NG', { dateStyle: 'medium' })}
+                  </time>
+                </div>
+                <p className="text-text-2 leading-relaxed">{r.body}</p>
+                <p className="font-semibold text-navy">
+                  {r.author_name}
+                  {r.author_location ? <span className="text-text-3 font-normal"> · {r.author_location}</span> : null}
+                </p>
+              </li>
+            ))}
+          </ul>
+        )}
 
         {/* Review Form */}
         <div className="bg-white p-6 rounded border border-stone">
-          <h4 className="font-serif text-base text-navy font-semibold mb-2">Leave a Client Review</h4>
+          <h4 className="font-serif text-base text-navy font-semibold mb-2">Leave a review</h4>
           {reviewSubmitted ? (
-            <div className="p-4 bg-emerald-50 text-aplus-success text-xs rounded border border-emerald-200">
-              Thank you for your review! Our moderation team will approve and publish it to the store.
+            <div role="status" className="p-4 bg-emerald-50 text-aplus-success text-xs rounded border border-emerald-200">
+              Thank you! Your review has been received and will appear once the owner approves it.
             </div>
           ) : (
-            <form onSubmit={handleReviewSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <form onSubmit={handleReviewSubmit} className="space-y-4" noValidate>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div>
-                  <label className="block text-xs font-medium text-navy mb-1">Your Full Name *</label>
+                  <label htmlFor="rev-name" className="block text-xs font-medium text-navy mb-1">Your name *</label>
                   <input
+                    id="rev-name"
                     type="text"
                     required
                     value={reviewerName}
                     onChange={(e) => setReviewerName(e.target.value)}
                     placeholder="e.g. Femi Adeyemi"
-                    className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy"
+                    className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy min-h-[44px]"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-medium text-navy mb-1">Rating (1 to 5 Stars) *</label>
+                  <label htmlFor="rev-location" className="block text-xs font-medium text-navy mb-1">City (optional)</label>
+                  <input
+                    id="rev-location"
+                    type="text"
+                    value={reviewerLocation}
+                    onChange={(e) => setReviewerLocation(e.target.value)}
+                    placeholder="e.g. Lagos"
+                    className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy min-h-[44px]"
+                  />
+                </div>
+                <div>
+                  <label htmlFor="rev-rating" className="block text-xs font-medium text-navy mb-1">Rating *</label>
                   <select
+                    id="rev-rating"
                     value={reviewerRating}
                     onChange={(e) => setReviewerRating(Number(e.target.value))}
-                    className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy"
+                    className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy min-h-[44px]"
                   >
-                    <option value={5}>5 Stars - Impeccable fit & quality</option>
-                    <option value={4}>4 Stars - Great quality</option>
-                    <option value={3}>3 Stars - Good</option>
+                    <option value={5}>5 — Impeccable</option>
+                    <option value={4}>4 — Great</option>
+                    <option value={3}>3 — Good</option>
+                    <option value={2}>2 — Fair</option>
+                    <option value={1}>1 — Poor</option>
                   </select>
                 </div>
               </div>
               <div>
-                <label className="block text-xs font-medium text-navy mb-1">Your Feedback *</label>
+                <label htmlFor="rev-body" className="block text-xs font-medium text-navy mb-1">Your feedback *</label>
                 <textarea
+                  id="rev-body"
                   required
                   rows={3}
+                  minLength={10}
+                  maxLength={2000}
                   value={reviewText}
                   onChange={(e) => setReviewText(e.target.value)}
-                  placeholder="Tell us about the fabric, tailoring fit, and the occasion you wore it to..."
+                  placeholder="Tell us about the fabric, the fit, and the occasion you wore it to…"
                   className="w-full px-3 py-2 text-xs bg-ivory-2 border border-stone rounded focus:outline-none focus:ring-1 focus:ring-navy"
                 />
               </div>
+              {reviewError && (
+                <p role="alert" className="p-3 bg-red-50 text-aplus-error text-xs rounded border border-red-200">
+                  {reviewError}
+                </p>
+              )}
               <button
                 type="submit"
-                className="px-5 py-2.5 bg-navy hover:bg-navy-2 text-ivory text-xs font-semibold rounded transition"
+                disabled={reviewSubmitting}
+                aria-busy={reviewSubmitting}
+                className="px-5 py-2.5 bg-navy hover:bg-navy-2 disabled:opacity-60 text-ivory text-xs font-semibold rounded transition min-h-[44px]"
               >
-                Submit Review for Moderation
+                {reviewSubmitting ? 'Submitting…' : 'Submit review'}
               </button>
             </form>
           )}
@@ -478,7 +608,7 @@ export function ProductDetailView({ product, relatedProducts }: ProductDetailVie
                   {p.name}
                 </Link>
                 <p className="text-xs text-navy font-medium mt-0.5">
-                  {formatMoney(p.price_kobo, currency)}
+                  {format(p.price_kobo)}
                 </p>
               </div>
             ))}

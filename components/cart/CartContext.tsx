@@ -1,15 +1,21 @@
 'use client';
 
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { CartItem, FitType } from '@/lib/types';
-import { calculateLineTotal } from '@/lib/money';
+import { CartItem, DisplayCurrency } from '@/lib/types';
+import { calculateLineTotal, DEFAULT_FX_RATES, formatMoney } from '@/lib/money';
+
+type FxRates = { USD: number; GBP: number };
 
 interface CartContextType {
   items: CartItem[];
   subtotalKobo: number;
   totalCount: number;
-  currency: 'NGN' | 'USD' | 'GBP';
-  setCurrency: (c: 'NGN' | 'USD' | 'GBP') => void;
+  currency: DisplayCurrency;
+  setCurrency: (c: DisplayCurrency) => void;
+  /** Published FX rates from store_settings (display-only; Paystack always charges NGN). */
+  fxRates: FxRates;
+  /** Formats integer kobo in the shopper's selected display currency. */
+  format: (kobo: number) => string;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
   addItem: (item: Omit<CartItem, 'id'>) => void;
@@ -23,7 +29,7 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = 'aplus_cart_v1';
 const CURRENCY_STORAGE_KEY = 'aplus_currency_v1';
 
-export function CartProvider({ children }: { children: React.ReactNode }) {
+export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { children: React.ReactNode; fxRates?: FxRates }) {
   const [items, setItems] = useState<CartItem[]>([]);
   const [currency, setCurrencyState] = useState<'NGN' | 'USD' | 'GBP'>('NGN');
   const [isCartOpen, setIsCartOpen] = useState(false);
@@ -112,6 +118,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
 
   const totalCount = items.reduce((sum, item) => sum + item.qty, 0);
 
+  const format = (kobo: number) => formatMoney(kobo, currency, fxRates);
+
   return (
     <CartContext.Provider
       value={{
@@ -120,6 +128,8 @@ export function CartProvider({ children }: { children: React.ReactNode }) {
         totalCount,
         currency,
         setCurrency,
+        fxRates,
+        format,
         isCartOpen,
         setIsCartOpen,
         addItem,

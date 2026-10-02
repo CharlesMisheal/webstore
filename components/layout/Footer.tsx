@@ -2,16 +2,18 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
 import { Shield, Sparkles, Truck, Phone, Mail, MapPin, Clock } from 'lucide-react';
+import { useStoreSettings } from '@/components/providers/StoreSettingsProvider';
+import { formatPhoneDisplay, normalizeWhatsAppNumber, whatsappUrl } from '@/lib/whatsapp';
+import type { Category } from '@/lib/types';
 
-export function Footer() {
-  const pathname = usePathname();
+interface FooterProps {
+  categories: Category[];
+}
 
-  // Hide on admin routes
-  if (pathname?.startsWith('/admin')) {
-    return null;
-  }
+export function Footer({ categories }: FooterProps) {
+  const { contact, social } = useStoreSettings();
+  const year = new Date().getFullYear();
 
   return (
     <footer className="bg-navy text-ivory border-t-2 border-gold pt-16 pb-12">
@@ -74,33 +76,37 @@ export function Footer() {
               Tailoring confidence and sartorial distinction for grooms, wedding parties, executives, and clients across the globe.
             </p>
 
-            <div className="pt-2 flex items-center space-x-3 text-xs text-gold-light">
+            <div className="pt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-gold-light">
+              {social.instagram && (
+                <a href={social.instagram} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                  Instagram
+                </a>
+              )}
+              <span aria-hidden="true">•</span>
               <a
-                href="https://instagram.com/aplusfashionhome"
+                href={social.whatsapp_channel || whatsappUrl(contact.whatsapp)}
                 target="_blank"
                 rel="noopener noreferrer"
                 className="hover:underline"
               >
-                Instagram
+                WhatsApp
               </a>
-              <span>•</span>
-              <a
-                href="https://wa.me/2347071374515"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
-              >
-                WhatsApp Channel
-              </a>
-              <span>•</span>
-              <a
-                href="https://facebook.com/aplusfashionhome"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="hover:underline"
-              >
-                Facebook
-              </a>
+              {social.facebook && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <a href={social.facebook} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    Facebook
+                  </a>
+                </>
+              )}
+              {social.tiktok && (
+                <>
+                  <span aria-hidden="true">•</span>
+                  <a href={social.tiktok} target="_blank" rel="noopener noreferrer" className="hover:underline">
+                    TikTok
+                  </a>
+                </>
+              )}
             </div>
           </div>
 
@@ -110,11 +116,11 @@ export function Footer() {
               The Collection
             </h5>
             <ul className="space-y-2 text-xs text-stone">
-              <li><Link href="/category/suits" className="hover:text-ivory transition">Bespoke Suits</Link></li>
-              <li><Link href="/category/blazers-jackets" className="hover:text-ivory transition">Blazers & Jackets</Link></li>
-              <li><Link href="/category/tuxedos" className="hover:text-ivory transition">Tuxedo Sets</Link></li>
-              <li><Link href="/category/shirts" className="hover:text-ivory transition">Egyptian Cotton Shirts</Link></li>
-              <li><Link href="/category/pants" className="hover:text-ivory transition">Tailored Trousers</Link></li>
+              {categories.map((c) => (
+                <li key={c.id}>
+                  <Link href={`/category/${c.slug}`} className="hover:text-ivory transition">{c.name}</Link>
+                </li>
+              ))}
               <li><Link href="/shop" className="hover:text-ivory transition font-medium text-gold-light">View Full Catalog</Link></li>
             </ul>
           </div>
@@ -141,20 +147,30 @@ export function Footer() {
             </h5>
             <div className="space-y-2.5 text-xs text-stone">
               <div className="flex items-start space-x-2">
-                <MapPin className="w-4 h-4 text-gold-light flex-shrink-0 mt-0.5" />
-                <span>2 Jagunmolu Street, Ondo Road, Ijebu-Ode, Ogun State</span>
+                <MapPin className="w-4 h-4 text-gold-light flex-shrink-0 mt-0.5" aria-hidden="true" />
+                <span>{contact.address}</span>
               </div>
               <div className="flex items-center space-x-2">
-                <Phone className="w-4 h-4 text-gold-light flex-shrink-0" />
-                <a href="tel:+2347071374515" className="hover:text-ivory">+234 707 137 4515</a>
+                <Phone className="w-4 h-4 text-gold-light flex-shrink-0" aria-hidden="true" />
+                <a href={`tel:+${normalizeWhatsAppNumber(contact.phone)}`} className="hover:text-ivory">
+                  {formatPhoneDisplay(contact.phone)}
+                </a>
+              </div>
+              {contact.alt_phone && (
+                <div className="flex items-center space-x-2">
+                  <Phone className="w-4 h-4 text-gold-light flex-shrink-0" aria-hidden="true" />
+                  <a href={`tel:+${normalizeWhatsAppNumber(contact.alt_phone)}`} className="hover:text-ivory">
+                    {formatPhoneDisplay(contact.alt_phone)}
+                  </a>
+                </div>
+              )}
+              <div className="flex items-center space-x-2">
+                <Mail className="w-4 h-4 text-gold-light flex-shrink-0" aria-hidden="true" />
+                <a href={`mailto:${contact.email}`} className="hover:text-ivory">{contact.email}</a>
               </div>
               <div className="flex items-center space-x-2">
-                <Mail className="w-4 h-4 text-gold-light flex-shrink-0" />
-                <a href="mailto:henryaplus82@gmail.com" className="hover:text-ivory">henryaplus82@gmail.com</a>
-              </div>
-              <div className="flex items-center space-x-2">
-                <Clock className="w-4 h-4 text-gold-light flex-shrink-0" />
-                <span>Mon–Sat: 9:00 AM – 6:00 PM</span>
+                <Clock className="w-4 h-4 text-gold-light flex-shrink-0" aria-hidden="true" />
+                <span>{contact.hours}</span>
               </div>
             </div>
           </div>
@@ -162,7 +178,7 @@ export function Footer() {
 
         {/* Bottom Bar */}
         <div className="pt-8 flex flex-col sm:flex-row items-center justify-between text-xs text-stone/80 space-y-4 sm:space-y-0">
-          <p>© 2026 A-Plus Fashion Home. All rights reserved. Ijebu-Ode, Nigeria.</p>
+          <p>© {year} A-Plus Fashion Home. All rights reserved. Ijebu-Ode, Nigeria.</p>
           <div className="flex items-center space-x-6">
             <Link href="/return-policy" className="hover:text-ivory transition">Alteration Policy</Link>
             <Link href="/size-guide" className="hover:text-ivory transition">Size Guide</Link>

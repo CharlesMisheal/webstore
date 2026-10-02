@@ -1,19 +1,31 @@
-import { NextResponse } from 'next/server';
-import { addAuditLog } from '@/lib/db';
+import { NextResponse, type NextRequest } from 'next/server';
+import { z } from 'zod';
+import { createContactMessage } from '@/lib/db';
+import { emailSchema, nameSchema, parsePublicForm, phoneSchema } from '@/lib/public-form';
 
-export async function POST(req: Request) {
+export const dynamic = 'force-dynamic';
+
+const schema = z.object({
+  name: nameSchema,
+  email: emailSchema,
+  phone: phoneSchema.optional().or(z.literal('')),
+  message: z.string().trim().min(10, 'Please tell us a little more (at least 10 characters)').max(3000),
+});
+
+export async function POST(req: NextRequest) {
+  const form = await parsePublicForm(req, { schema, bucket: 'contact', limit: 5, windowSeconds: 60 * 60 });
+  if (!form.ok) return form.response;
+
   try {
-    const body = await req.json();
-
-    addAuditLog({
-      actor_email: body.email || 'anonymous',
-      action: 'contact.message_received',
-      entity: 'contact_messages',
-      after: { name: body.name, email: body.email, message: body.message },
+    const saved = await createContactMessage({
+      name: form.data.name,
+      email: form.data.email,
+      phone: form.data.phone || undefined,
+      message: form.data.message,
     });
-
-    return NextResponse.json({ success: true, message: 'Message logged' });
-  } catch (err: unknown) {
-    return NextResponse.json({ message: (err as Error).message }, { status: 500 });
+    return NextResponse.json({ success: true, id: saved.id });
+  } catch (err) {
+    console.error('[contact] create failed:', err);
+    return NextResponse.json({ message: 'We could not send your message right now. Please try WhatsApp instead.' }, { status: 500 });
   }
 }

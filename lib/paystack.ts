@@ -1,90 +1,109 @@
 import crypto from 'crypto';
 
-export interface PaystackInitResponse {
-  status: boolean;
-  message: string;
-  data?: {
-    authorization_url: string;
-    access_code: string;
-    reference: string;
-  };
-}
-
-export interface PaystackVerifyResponse {
-  status: boolean;
-  message: string;
-  data?: {
-    id: number;
-    reference: string;
-    amount: number; // in kobo
-    currency: string;
-    status: 'success' | 'failed' | 'abandoned';
-    channel: string;
-    customer: {
-      email: string;
-    };
-    metadata?: Record<string, unknown>;
-  };
-}
-
 /**
- * Validates the Paystack webhook signature using HMAC SHA-512 and timingSafeEqual.
- * Hard rule from developer-note.md:
- * Webhook must verify x-paystack-signature (HMAC SHA512 of the raw body with secret key).
+ * Thin Paystack REST client. Server only (uses the secret key).
+ * No demo/mock mode: if the key is missing the caller gets a clear error and
+ * the storefront offers the WhatsApp fallback instead of pretending to charge.
  */
-export function verifyPaystackSignature(rawBody: string, signature: string, secretKey?: string): boolean {
-  const secret = secretKey || process.env.PAYSTACK_SECRET_KEY || 'sk_test_sample';
-  if (!signature || !rawBody) return false;
 
+const PAYSTACK_API = 'https://api.paystack.co';
+
+export class PaystackError extends Error {
+  constructor(message: string, public status = 502) {
+    super(message);
+    this.name = 'PaystackError';
+  }
+}
+
+function secretKey(): string {
+  const key = process.env.PAYSTACK_SECRET_KEY;
+  if (!key || !/^sk_(test|live)_[A-Za-z0-9]{10,}$/.test(key) || key.includes('xxxx') || key.endsWith('_sample')) {
+    throw new PaystackError('Paystack is not configured. Set PAYSTACK_SECRET_KEY to your sk_test_/sk_live_ key.', 503);
+  }
+  return key;
+}
+
+export function isPaystackConfigured(): boolean {
   try {
-    const hash = crypto.createHmac('sha512', secret).update(rawBody).digest('hex');
-    const hashBuffer = Buffer.from(hash, 'utf-8');
-    const sigBuffer = Buffer.from(signature, 'utf-8');
-
-    if (hashBuffer.length !== sigBuffer.length) {
-      return false;
-    }
-
-    return crypto.timingSafeEqual(hashBuffer, sigBuffer);
+    secretKey();
+    return true;
   } catch {
     return false;
   }
 }
 
+export interface PaystackInitData {
+  authorization_url: string;
+  access_code: string;
+  reference: string;
+}
+
+export interface PaystackTransactionData {
+  id: number;
+  reference: string;
+  amount: number; // kobo
+  currency: string;
+  status: 'success' | 'failed' | 'abandoned' | 'pending' | 'reversed' | 'ongoing' | 'processing' | 'queued';
+  channel?: string;
+  paid_at?: string | null;
+  gateway_response?: string;
+  customer?: { email?: string };
+  metadata?: Record<string, unknown> | string | null;
+  fees?: number | null;
+}
+
+interface PaystackEnvelope<T> {
+  status: boolean;
+  message: string;
+  data?: T;
+}
+
+async function paystackFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${PAYSTACK_API}${path}`, {
+    ...init,
+    headers: {
+      Authorization: `Bearer ${secretKey()}`,
+      'Content-Type': 'application/json',
+      ...(init?.headers || {}),
+    },
+    cache: 'no-store',
+  });
+  const json = (await res.json().catch(() => null)) as PaystackEnvelope<T> | null;
+  if (!res.ok || !json || !json.status || json.data === undefined) {
+    throw new PaystackError(json?.message || `Paystack request failed (${res.status})`, res.status >= 500 ? 502 : 400);
+  }
+  return json.data;
+}
+
 /**
- * Calls Paystack API to initialize a checkout transaction.
+ * Validates the Paystack webhook signature: HMAC SHA-512 of the raw body with
+ * the secret key, compared with timingSafeEqual (developer-note.md §5).
  */
+export function verifyPaystackSignature(rawBody: string, signature: string | null | undefined, secret?: string): boolean {
+  if (!signature || !rawBody) return false;
+  try {
+    const key = secret ?? secretKey();
+    const expected = crypto.createHmac('sha512', key).update(rawBody).digest('hex');
+    const a = Buffer.from(expected, 'utf8');
+    const b = Buffer.from(signature, 'utf8');
+    return a.length === b.length && crypto.timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
 export async function initializePaystackTransaction(params: {
   email: string;
   amountKobo: number;
   reference: string;
   callbackUrl: string;
   metadata?: Record<string, unknown>;
-}): Promise<PaystackInitResponse> {
-  const secret = process.env.PAYSTACK_SECRET_KEY;
-
-  // In test/demo without active Paystack secret key, return seamless local mock authorization URL
-  if (!secret || secret === 'sk_test_sample') {
-    return {
-      status: true,
-      message: 'Demo transaction initialized',
-      data: {
-        authorization_url: `${params.callbackUrl}?reference=${params.reference}&demo=true`,
-        access_code: `demo_acc_${Date.now()}`,
-        reference: params.reference,
-      },
-    };
-  }
-
-  const response = await fetch('https://api.paystack.co/transaction/initialize', {
+}): Promise<PaystackInitData> {
+  return paystackFetch<PaystackInitData>('/transaction/initialize', {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      'Content-Type': 'application/json',
-    },
     body: JSON.stringify({
       email: params.email,
-      amount: params.amountKobo,
+      amount: Math.floor(params.amountKobo),
       currency: 'NGN',
       reference: params.reference,
       callback_url: params.callbackUrl,
@@ -92,39 +111,29 @@ export async function initializePaystackTransaction(params: {
       metadata: params.metadata,
     }),
   });
-
-  return response.json();
 }
 
-/**
- * Calls Paystack API to verify a transaction reference.
- */
-export async function verifyPaystackTransaction(reference: string): Promise<PaystackVerifyResponse> {
-  const secret = process.env.PAYSTACK_SECRET_KEY;
+export async function verifyPaystackTransaction(reference: string): Promise<PaystackTransactionData> {
+  return paystackFetch<PaystackTransactionData>(`/transaction/verify/${encodeURIComponent(reference)}`, { method: 'GET' });
+}
 
-  if (!secret || secret === 'sk_test_sample') {
-    return {
-      status: true,
-      message: 'Demo transaction verified successfully',
-      data: {
-        id: 999999,
-        reference,
-        amount: 18950000,
-        currency: 'NGN',
-        status: 'success',
-        channel: 'card',
-        customer: { email: 'customer@example.com' },
-      },
-    };
-  }
+export interface PaystackRefundData {
+  id: number;
+  transaction: { id: number; reference: string } | number;
+  amount: number;
+  currency: string;
+  status: string;
+}
 
-  const response = await fetch(`https://api.paystack.co/transaction/verify/${encodeURIComponent(reference)}`, {
-    method: 'GET',
-    headers: {
-      Authorization: `Bearer ${secret}`,
-      'Content-Type': 'application/json',
-    },
+/** Full or partial refund. Amount in kobo; omit for a full refund. */
+export async function createPaystackRefund(params: { reference: string; amountKobo?: number; reason?: string }): Promise<PaystackRefundData> {
+  return paystackFetch<PaystackRefundData>('/refund', {
+    method: 'POST',
+    body: JSON.stringify({
+      transaction: params.reference,
+      amount: params.amountKobo !== undefined ? Math.floor(params.amountKobo) : undefined,
+      currency: 'NGN',
+      merchant_note: params.reason,
+    }),
   });
-
-  return response.json();
 }

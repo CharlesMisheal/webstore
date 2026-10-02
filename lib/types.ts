@@ -7,8 +7,33 @@ export interface Profile {
   phone?: string;
   country: string;
   role: UserRole;
-  welcome_sent_at?: string;
+  welcome_sent_at?: string | null;
+  measurements?: Measurements | null;
   created_at: string;
+}
+
+export interface Measurements {
+  chest?: string;
+  waist?: string;
+  shoulder?: string;
+  sleeve?: string;
+  height?: string;
+  notes?: string;
+}
+
+/** Admin "Customers" list row: a profile, or a guest grouped by email. */
+export interface CustomerSummary {
+  id: string; // profile id, or `guest:<email>`
+  user_id?: string | null;
+  full_name: string;
+  email: string;
+  phone?: string;
+  country?: string;
+  is_guest: boolean;
+  order_count: number;
+  total_spent_kobo: number;
+  last_order_at?: string | null;
+  created_at?: string;
 }
 
 export interface Category {
@@ -120,12 +145,18 @@ export interface Order {
   total_kobo: number;
   currency: 'NGN' | 'USD' | 'GBP';
   shipping_address: ShippingAddress;
-  tracking_url?: string;
-  internal_note?: string;
-  confirmation_sent_at?: string;
+  tracking_url?: string | null;
+  internal_note?: string | null;
+  confirmation_sent_at?: string | null;
+  cancelled_at?: string | null;
+  cancel_reason?: string | null;
   placed_at: string;
+  updated_at?: string;
   items: OrderItemSnapshot[];
+  /** Most relevant payment attempt: the successful one if any, else the latest. */
   payment?: Payment;
+  /** Every Paystack attempt for this order (retries create new references). */
+  payments?: Payment[];
 }
 
 export type PaymentStatus = 'initialized' | 'pending' | 'success' | 'failed' | 'abandoned';
@@ -176,7 +207,9 @@ export interface Quote {
   quoted_price_kobo?: number | null;
   ready_by?: string | null;
   owner_message?: string | null;
+  reply_sent_at?: string | null;
   created_at: string;
+  updated_at?: string;
 }
 
 export type BookingStatus = 'requested' | 'confirmed' | 'rescheduled' | 'rejected' | 'cancelled';
@@ -241,6 +274,20 @@ export interface DeliveryRule {
   eta: string;
 }
 
+export type StoreSettingKey = keyof StoreSettings;
+
+/** Shopper-selected display currency. Charges are always made in NGN. */
+export type DisplayCurrency = 'NGN' | 'USD' | 'GBP';
+
+/** Admin view of one settings row: published value plus optional unpublished draft. */
+export interface StoreSettingRow<K extends StoreSettingKey = StoreSettingKey> {
+  key: K;
+  value: StoreSettings[K];
+  draft_value: StoreSettings[K] | null;
+  updated_by?: string | null;
+  updated_at?: string;
+}
+
 export interface StoreSettings {
   homepage_banners: HomepageBanner[];
   about: {
@@ -273,7 +320,7 @@ export interface StoreSettings {
 
 export interface AuditLogEntry {
   id: number;
-  actor_id?: string;
+  actor_id?: string | null;
   actor_email: string;
   action: string;
   entity: string;

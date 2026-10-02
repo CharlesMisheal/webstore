@@ -1,118 +1,162 @@
-import { NextResponse } from 'next/server';
+import { NextResponse, type NextRequest } from 'next/server';
 import { z } from 'zod';
-import { createOrder, getProductById } from '@/lib/db';
-import { initializePaystackTransaction } from '@/lib/paystack';
-import { calculateLineTotal, calculateTotal } from '@/lib/money';
+import {
+  addAuditLog,
+  consumeRateLimit,
+  createOrder,
+  createPaymentAttempt,
+  getStoreSettings,
+  getVariantsByIds,
+  orderNumberExists,
+} from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
+import { buildOrderDraft, CheckoutError, newPaymentReference } from '@/lib/checkout';
+import { initializePaystackTransaction, isPaystackConfigured, PaystackError } from '@/lib/paystack';
+import { generateOrderNumber } from '@/lib/money';
 
-const orderSchema = z.object({
-  order_number: z.string(),
-  customer_name: z.string().min(2),
-  customer_email: z.string().email(),
-  customer_phone: z.string().min(8),
-  shipping_address: z.object({
-    fullName: z.string(),
-    email: z.string(),
-    phone: z.string(),
-    address: z.string(),
-    city: z.string(),
-    state: z.string(),
-    country: z.string(),
-    deliveryOptionId: z.string(),
-    deliveryMethod: z.string(),
-    deliveryNotes: z.string().optional(),
+export const dynamic = 'force-dynamic';
+
+/**
+ * The client sends ONLY identifiers and quantities. Prices, delivery fee,
+ * stock and totals are recomputed here from the database (aplus-agent.md §6).
+ */
+const schema = z.object({
+  customer: z.object({
+    fullName: z.string().trim().min(2).max(120),
+    email: z.string().trim().email().max(254),
+    phone: z.string().trim().min(7).max(32),
   }),
-  delivery_fee_kobo: z.number().int().min(0),
-  items: z.array(
-    z.object({
-      product_id: z.string(),
-      variant_id: z.string(),
-      name_snapshot: z.string(),
-      size_snapshot: z.string(),
-      fit_type: z.enum(['ready_to_wear', 'bespoke']),
-      qty: z.number().int().min(1),
-    })
-  ).min(1),
+  shipping: z.object({
+    address: z.string().trim().min(5).max(300),
+    city: z.string().trim().min(2).max(80),
+    state: z.string().trim().min(2).max(80),
+    country: z.string().trim().min(2).max(80),
+    deliveryOptionId: z.string().trim().min(1).max(64),
+    deliveryNotes: z.string().trim().max(500).optional(),
+  }),
+  items: z
+    .array(
+      z.object({
+        variant_id: z.string().trim().min(1).max(64),
+        qty: z.number().int().min(1).max(20),
+        fit_type: z.enum(['ready_to_wear', 'bespoke']),
+      })
+    )
+    .min(1)
+    .max(30),
 });
 
-export async function POST(req: Request) {
+async function uniqueOrderNumber(): Promise<string> {
+  for (let i = 0; i < 5; i++) {
+    const candidate = generateOrderNumber();
+    if (!(await orderNumberExists(candidate))) return candidate;
+  }
+  throw new Error('Could not allocate a unique order number');
+}
+
+export async function POST(req: NextRequest) {
+  const ip = req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() || 'unknown';
+  if (!(await consumeRateLimit(`pay-init:${ip}`, 10, 60 * 10))) {
+    return NextResponse.json({ message: 'Too many checkout attempts. Please wait a few minutes and try again.' }, { status: 429 });
+  }
+
+  if (!isPaystackConfigured()) {
+    return NextResponse.json(
+      { message: 'Online payment is temporarily unavailable. Please order via WhatsApp and we will confirm by bank transfer.', code: 'PAYSTACK_UNCONFIGURED' },
+      { status: 503 }
+    );
+  }
+
+  let body: z.infer<typeof schema>;
   try {
-    const json = await req.json();
-    const parsed = orderSchema.parse(json);
+    body = schema.parse(await req.json());
+  } catch (err) {
+    const issue = err instanceof z.ZodError ? err.issues[0] : null;
+    return NextResponse.json({ message: issue ? `${issue.path.join('.')}: ${issue.message}` : 'Invalid request' }, { status: 400 });
+  }
 
-    // Hard Rule from developer-note.md:
-    // Never trust client prices or totals. Recalculate everything server-side.
-    let verifiedSubtotalKobo = 0;
-    const verifiedItems = [];
+  try {
+    const [settings, variants, user] = await Promise.all([
+      getStoreSettings(),
+      getVariantsByIds(Array.from(new Set(body.items.map((i) => i.variant_id)))),
+      getCurrentUser(),
+    ]);
 
-    for (const item of parsed.items) {
-      const dbProduct = await getProductById(item.product_id);
-      if (!dbProduct) {
-        return NextResponse.json({ message: `Product ${item.product_id} not found` }, { status: 400 });
-      }
-
-      const unitPriceKobo = dbProduct.price_kobo;
-      const lineTotalKobo = calculateLineTotal(unitPriceKobo, item.qty);
-      verifiedSubtotalKobo += lineTotalKobo;
-
-      const coverImg = dbProduct.images.find((i) => i.is_cover) || dbProduct.images[0];
-
-      verifiedItems.push({
-        id: `item_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
-        order_id: '',
-        product_id: dbProduct.id,
-        variant_id: item.variant_id,
-        name_snapshot: dbProduct.name,
-        size_snapshot: item.size_snapshot,
-        fit_type: item.fit_type,
-        unit_price_kobo: unitPriceKobo,
-        qty: item.qty,
-        line_total_kobo: lineTotalKobo,
-        image_snapshot: coverImg?.storage_path,
-      });
-    }
-
-    const verifiedTotalKobo = calculateTotal(verifiedSubtotalKobo, parsed.delivery_fee_kobo);
-
-    // Save order with status 'pending'
-    const createdOrder = await createOrder({
-      order_number: parsed.order_number,
-      customer_name: parsed.customer_name,
-      customer_email: parsed.customer_email,
-      customer_phone: parsed.customer_phone,
-      status: 'pending',
-      subtotal_kobo: verifiedSubtotalKobo,
-      delivery_fee_kobo: parsed.delivery_fee_kobo,
-      total_kobo: verifiedTotalKobo,
-      currency: 'NGN',
-      shipping_address: parsed.shipping_address,
-      items: verifiedItems,
+    const draft = buildOrderDraft({
+      lines: body.items,
+      variants,
+      deliveryRules: settings.delivery_rules,
+      deliveryOptionId: body.shipping.deliveryOptionId,
     });
 
-    // Unique reference per attempt
-    const reference = `APF-${parsed.order_number}-${Date.now().toString(36)}`;
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    const callbackUrl = `${siteUrl}/order/${parsed.order_number}/confirmation`;
+    const orderNumber = await uniqueOrderNumber();
+    const order = await createOrder({
+      order_number: orderNumber,
+      user_id: user?.id ?? null,
+      customer_name: body.customer.fullName,
+      customer_email: body.customer.email.toLowerCase(),
+      customer_phone: body.customer.phone,
+      subtotal_kobo: draft.subtotal_kobo,
+      delivery_fee_kobo: draft.delivery_fee_kobo,
+      total_kobo: draft.total_kobo,
+      shipping_address: {
+        fullName: body.customer.fullName,
+        email: body.customer.email.toLowerCase(),
+        phone: body.customer.phone,
+        address: body.shipping.address,
+        city: body.shipping.city,
+        state: body.shipping.state,
+        country: body.shipping.country,
+        deliveryOptionId: draft.delivery_rule.id,
+        deliveryMethod: draft.delivery_rule.label,
+        deliveryNotes: body.shipping.deliveryNotes,
+      },
+      items: draft.items,
+    });
 
-    // Initialize Paystack
-    const paystackResult = await initializePaystackTransaction({
-      email: parsed.customer_email,
-      amountKobo: verifiedTotalKobo,
+    const reference = newPaymentReference(order.order_number);
+    await createPaymentAttempt(order.id, reference, order.total_kobo);
+
+    const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin).replace(/\/$/, '');
+    const callbackUrl = `${siteUrl}/order/${order.order_number}/confirmation`;
+
+    const init = await initializePaystackTransaction({
+      email: order.customer_email,
+      amountKobo: order.total_kobo,
       reference,
       callbackUrl,
       metadata: {
-        order_id: createdOrder.id,
-        order_number: createdOrder.order_number,
+        order_id: order.id,
+        order_number: order.order_number,
+        custom_fields: [{ display_name: 'Order', variable_name: 'order_number', value: order.order_number }],
       },
+    });
+
+    await addAuditLog({
+      actor_email: order.customer_email,
+      action: 'order.created',
+      entity: 'orders',
+      entity_id: order.id,
+      after: { order_number: order.order_number, total_kobo: order.total_kobo, reference },
+      ip,
     });
 
     return NextResponse.json({
       success: true,
-      authorization_url: paystackResult.data?.authorization_url || `${callbackUrl}?reference=${reference}&demo=true`,
+      authorization_url: init.authorization_url,
       reference,
-      order_number: createdOrder.order_number,
+      order_number: order.order_number,
+      total_kobo: order.total_kobo,
     });
-  } catch (err: unknown) {
-    console.error('Paystack initialize error:', err);
-    return NextResponse.json({ message: (err as Error).message || 'Server error' }, { status: 500 });
+  } catch (err) {
+    if (err instanceof CheckoutError) {
+      return NextResponse.json({ message: err.message, code: err.code, details: err.details }, { status: 409 });
+    }
+    if (err instanceof PaystackError) {
+      console.error('[pay/initialize] Paystack error:', err.message);
+      return NextResponse.json({ message: 'We could not start the payment. Please try again or order via WhatsApp.' }, { status: err.status });
+    }
+    console.error('[pay/initialize] failed:', err);
+    return NextResponse.json({ message: 'Something went wrong while creating your order.' }, { status: 500 });
   }
 }

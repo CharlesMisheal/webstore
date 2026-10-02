@@ -4,34 +4,36 @@ import React, { useState } from 'react';
 import Link from 'next/link';
 import Image from 'next/image';
 import { usePathname } from 'next/navigation';
+import { useRouter } from 'next/navigation';
 import { ShoppingBag, Menu, X, Search, User, ShieldCheck } from 'lucide-react';
 import { useCart } from '../cart/CartContext';
+import { useStoreSettings } from '@/components/providers/StoreSettingsProvider';
+import { formatPhoneDisplay, whatsappUrl } from '@/lib/whatsapp';
+import type { Category } from '@/lib/types';
 
-export function Navbar() {
+interface NavbarProps {
+  categories: Category[];
+}
+
+export function Navbar({ categories }: NavbarProps) {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const pathname = usePathname();
+  const router = useRouter();
   const { totalCount, setIsCartOpen, currency, setCurrency } = useCart();
-
-  // Hide main store navbar on admin pages
-  if (pathname?.startsWith('/admin')) {
-    return null;
-  }
+  const { contact } = useStoreSettings();
 
   const handleSearchSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (searchQuery.trim()) {
-      window.location.href = `/shop?q=${encodeURIComponent(searchQuery.trim())}`;
+      router.push(`/shop?q=${encodeURIComponent(searchQuery.trim())}`);
+      setIsSearchOpen(false);
     }
   };
 
   const navLinks = [
-    { label: 'Suits', href: '/category/suits' },
-    { label: 'Blazers', href: '/category/blazers-jackets' },
-    { label: 'Tuxedos', href: '/category/tuxedos' },
-    { label: 'Shirts', href: '/category/shirts' },
-    { label: 'Pants', href: '/category/pants' },
+    ...categories.slice(0, 5).map((c) => ({ label: c.name, href: `/category/${c.slug}` })),
     { label: 'Bespoke Quote', href: '/quote' },
     { label: 'Book Fitting', href: '/booking' },
     { label: 'Reviews', href: '/reviews' },
@@ -46,7 +48,9 @@ export function Navbar() {
         <span className="text-gold">•</span>
         <span>Delivery Across Nigeria & Worldwide</span>
         <span className="text-gold hidden sm:inline">•</span>
-        <span className="hidden sm:inline">WhatsApp: +234 707 137 4515</span>
+        <a href={whatsappUrl(contact.whatsapp)} target="_blank" rel="noopener noreferrer" className="hidden sm:inline hover:underline">
+          WhatsApp: {formatPhoneDisplay(contact.whatsapp)}
+        </a>
       </div>
 
       {/* Main Navbar */}
@@ -90,11 +94,12 @@ export function Navbar() {
           </div>
 
           {/* Desktop Navigation Links */}
-          <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium">
+          <nav className="hidden lg:flex items-center space-x-6 text-sm font-medium" aria-label="Primary">
             {navLinks.map((link) => (
               <Link
                 key={link.href}
                 href={link.href}
+                aria-current={pathname === link.href ? 'page' : undefined}
                 className={`transition hover:text-gold-light py-1 ${
                   pathname === link.href ? 'text-gold-light font-semibold border-b-2 border-gold-light' : 'text-ivory/90'
                 }`}
@@ -169,8 +174,10 @@ export function Navbar() {
         {isSearchOpen && (
           <div className="py-3 border-t border-navy-2 animate-in fade-in slide-in-from-top-1">
             <form onSubmit={handleSearchSubmit} className="relative">
+              <label htmlFor="site-search" className="sr-only">Search products</label>
               <input
-                type="text"
+                id="site-search"
+                type="search"
                 placeholder="Search bespoke suits, tuxedos, blazers, sizes..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}

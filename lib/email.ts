@@ -1,143 +1,201 @@
 /**
- * Email service for A-Plus Fashion Home.
- * Handles transactional emails via Mailgun using templates defined in developer-note.md.
+ * Transactional email for A-Plus Fashion Home (Mailgun REST API, inline HTML).
+ *
+ * The three templates come from the design pack (/emails). Callers are
+ * responsible for the "exactly once" guarantee via the DB claim functions
+ * (claim_order_confirmation / claim_welcome_email); this module additionally
+ * passes a Mailgun idempotency key so a retried request cannot double-send.
+ *
+ * When Mailgun is not configured the send is logged and reported as skipped
+ * (returns false) so the caller can decide whether to roll back its claim.
  */
 
-import { Order, Quote } from './types';
+import { Order, Quote, StoreSettings } from './types';
 import { formatNaira } from './money';
+import { formatPhoneDisplay, whatsappUrl } from './whatsapp';
+import { htmlToText, renderEmail, TemplateVars } from './email-templates';
 
-export async function sendOrderConfirmationEmail(order: Order): Promise<boolean> {
+export interface MailgunConfig {
+  apiKey: string;
+  domain: string;
+  from: string;
+  baseUrl: string;
+}
+
+export function getMailgunConfig(): MailgunConfig | null {
   const apiKey = process.env.MAILGUN_API_KEY;
   const domain = process.env.MAILGUN_DOMAIN;
+  if (!apiKey || !domain || apiKey.startsWith('sample') || apiKey.startsWith('your_')) return null;
+  return {
+    apiKey,
+    domain,
+    from: process.env.MAILGUN_FROM || `A-Plus Fashion Home <orders@${domain}>`,
+    // EU domains must use api.eu.mailgun.net.
+    baseUrl: process.env.MAILGUN_API_BASE || 'https://api.mailgun.net',
+  };
+}
 
-  // In test or development without active Mailgun credentials, log and simulate success
-  if (!apiKey || !domain || apiKey.startsWith('sample')) {
-    console.log(`[Mailgun Mock] Order Confirmation Email sent to ${order.customer_email} for order ${order.order_number}`);
-    return true;
+export const isEmailConfigured = () => getMailgunConfig() !== null;
+
+function siteUrl(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000').replace(/\/$/, '');
+}
+
+/** Variables shared by every template's header/footer. */
+export function commonVars(settings: StoreSettings): TemplateVars {
+  const site = siteUrl();
+  return {
+    logo_url: `${site}/images/logo.png`,
+    site_url: site,
+    shop_url: `${site}/shop`,
+    quote_url: `${site}/quote`,
+    booking_url: `${site}/booking`,
+    shop_address: settings.contact.address,
+    shop_email: settings.contact.email,
+    whatsapp_number: formatPhoneDisplay(settings.contact.whatsapp),
+    whatsapp_url: whatsappUrl(settings.contact.whatsapp),
+    instagram_url: settings.social.instagram || site,
+  };
+}
+
+interface SendArgs {
+  to: string;
+  subject: string;
+  html: string;
+  tag: string;
+  idempotencyKey?: string;
+  replyTo?: string;
+}
+
+export async function sendMailgunMessage(args: SendArgs): Promise<boolean> {
+  const cfg = getMailgunConfig();
+  if (!cfg) {
+    console.warn(`[email] Mailgun not configured — skipped "${args.subject}" to ${args.to}`);
+    return false;
   }
 
-  try {
-    const from = process.env.MAILGUN_FROM || `A-Plus Fashion Home <orders@${domain}>`;
-    const body = new URLSearchParams({
-      from,
-      to: order.customer_email,
-      subject: `Order ${order.order_number} confirmed — thank you, ${order.customer_name}`,
-      template: 'order-confirmation',
-      'h:X-Mailgun-Variables': JSON.stringify({
-        customer_name: order.customer_name,
-        order_number: order.order_number,
-        order_date: new Date(order.placed_at).toLocaleDateString('en-NG', { dateStyle: 'medium' }),
-        subtotal: formatNaira(order.subtotal_kobo),
-        delivery_fee: formatNaira(order.delivery_fee_kobo),
-        total: formatNaira(order.total_kobo),
-        delivery_method: order.shipping_address.deliveryMethod,
-        delivery_address: `${order.shipping_address.address}, ${order.shipping_address.city}, ${order.shipping_address.state}`,
-        tracking_url: `${process.env.NEXT_PUBLIC_SITE_URL || ''}/track?order=${order.order_number}`,
-      }),
-      'o:tag': 'order-confirmation',
-      'h:Idempotency-Key': `order-confirmation-${order.id}`,
-    });
+  const body = new URLSearchParams({
+    from: cfg.from,
+    to: args.to,
+    subject: args.subject,
+    html: args.html,
+    text: htmlToText(args.html),
+    'o:tag': args.tag,
+    'o:tracking-clicks': 'no',
+  });
+  if (args.replyTo) body.set('h:Reply-To', args.replyTo);
+  if (args.idempotencyKey) body.set('h:X-Idempotency-Key', args.idempotencyKey);
 
-    const res = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
+  try {
+    const res = await fetch(`${cfg.baseUrl}/v3/${cfg.domain}/messages`, {
       method: 'POST',
       headers: {
-        Authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString('base64')}`,
+        Authorization: `Basic ${Buffer.from(`api:${cfg.apiKey}`).toString('base64')}`,
         'Content-Type': 'application/x-www-form-urlencoded',
       },
       body: body.toString(),
     });
-
-    return res.ok;
+    if (!res.ok) {
+      console.error(`[email] Mailgun ${res.status} for "${args.subject}":`, await res.text().catch(() => ''));
+      return false;
+    }
+    return true;
   } catch (err) {
-    console.error('Mailgun order confirmation error:', err);
+    console.error('[email] Mailgun request failed:', err);
     return false;
   }
 }
 
-export async function sendWelcomeEmail(customerName: string, customerEmail: string): Promise<boolean> {
-  const apiKey = process.env.MAILGUN_API_KEY;
-  const domain = process.env.MAILGUN_DOMAIN;
+// ==================== Templates ====================
 
-  if (!apiKey || !domain || apiKey.startsWith('sample')) {
-    console.log(`[Mailgun Mock] Welcome Email sent to ${customerEmail}`);
-    return true;
-  }
-
-  try {
-    const from = process.env.MAILGUN_FROM || `A-Plus Fashion Home <orders@${domain}>`;
-    const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || 'http://localhost:3000';
-    const body = new URLSearchParams({
-      from,
-      to: customerEmail,
-      subject: `Welcome to A-Plus Fashion Home, ${customerName}`,
-      template: 'welcome',
-      'h:X-Mailgun-Variables': JSON.stringify({
-        customer_name: customerName,
-        shop_url: `${siteUrl}/shop`,
-        quote_url: `${siteUrl}/quote`,
-        booking_url: `${siteUrl}/booking`,
-        whatsapp_number: '+2347071374515',
-        whatsapp_url: 'https://wa.me/2347071374515',
-      }),
-      'o:tag': 'welcome',
-    });
-
-    const res = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString('base64')}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
-
-    return res.ok;
-  } catch (err) {
-    console.error('Mailgun welcome email error:', err);
-    return false;
-  }
+function fitLabel(fit: string) {
+  return fit === 'bespoke' ? 'Made to measure' : 'Ready to wear';
 }
 
-export async function sendQuoteReceivedEmail(quote: Quote): Promise<boolean> {
-  const apiKey = process.env.MAILGUN_API_KEY;
-  const domain = process.env.MAILGUN_DOMAIN;
+export async function sendOrderConfirmationEmail(order: Order, settings: StoreSettings): Promise<boolean> {
+  const payment = order.payment;
+  const rule = settings.delivery_rules.find((r) => r.id === order.shipping_address.deliveryOptionId);
+  const site = siteUrl();
+  const addr = order.shipping_address;
 
-  if (!apiKey || !domain || apiKey.startsWith('sample')) {
-    console.log(`[Mailgun Mock] Quote Received Email sent to ${quote.customer_email} for reference ${quote.reference}`);
-    return true;
-  }
+  const html = renderEmail('order-confirmation', {
+    ...commonVars(settings),
+    customer_name: order.customer_name,
+    order_number: order.order_number,
+    order_date: new Date(order.placed_at).toLocaleDateString('en-NG', { dateStyle: 'medium' }),
+    items: order.items.map((i) => ({
+      name: i.name_snapshot,
+      size: i.size_snapshot,
+      fit_type: fitLabel(i.fit_type),
+      qty: i.qty,
+      line_total: formatNaira(i.line_total_kobo),
+      image_url: i.image_snapshot
+        ? i.image_snapshot.startsWith('http')
+          ? i.image_snapshot
+          : `${site}${i.image_snapshot}`
+        : `${site}/images/logo.png`,
+    })),
+    subtotal: formatNaira(order.subtotal_kobo),
+    delivery_method: addr.deliveryMethod,
+    delivery_fee: order.delivery_fee_kobo === 0 ? 'Free' : formatNaira(order.delivery_fee_kobo),
+    total: formatNaira(order.total_kobo),
+    payment_channel: payment?.channel || 'Paystack',
+    payment_reference: payment?.reference || '—',
+    delivery_address: [addr.address, addr.city, addr.state, addr.country].filter(Boolean).join(', '),
+    estimated_delivery: rule?.eta || 'We will confirm by WhatsApp',
+    tracking_url: `${site}/track?order=${encodeURIComponent(order.order_number)}`,
+  });
 
-  try {
-    const from = process.env.MAILGUN_FROM || `A-Plus Fashion Home <orders@${domain}>`;
-    const body = new URLSearchParams({
-      from,
-      to: quote.customer_email,
-      subject: `We've received your quote request ${quote.reference}`,
-      template: 'quotation-received',
-      'h:X-Mailgun-Variables': JSON.stringify({
-        customer_name: quote.customer_name,
-        quote_reference: quote.reference,
-        garment: quote.garment,
-        occasion: quote.occasion,
-        event_date: quote.event_date || 'Not specified',
-        budget: quote.budget_min_kobo ? `${formatNaira(quote.budget_min_kobo)} – ${formatNaira(quote.budget_max_kobo || 0)}` : 'Custom discussion',
-        contact_preference: quote.contact_preference,
-      }),
-      'o:tag': 'quotation-received',
-    });
+  return sendMailgunMessage({
+    to: order.customer_email,
+    subject: `Order ${order.order_number} confirmed — thank you, ${order.customer_name}`,
+    html,
+    tag: 'order-confirmation',
+    idempotencyKey: `order-confirmation-${order.id}`,
+    replyTo: settings.contact.email,
+  });
+}
 
-    const res = await fetch(`https://api.mailgun.net/v3/${domain}/messages`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Basic ${Buffer.from(`api:${apiKey}`).toString('base64')}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-      },
-      body: body.toString(),
-    });
+export async function sendWelcomeEmail(args: { customerName: string; customerEmail: string; settings: StoreSettings }): Promise<boolean> {
+  const html = renderEmail('welcome', {
+    ...commonVars(args.settings),
+    customer_name: args.customerName || 'there',
+  });
+  return sendMailgunMessage({
+    to: args.customerEmail,
+    subject: `Welcome to A-Plus Fashion Home, ${args.customerName || 'friend'}`,
+    html,
+    tag: 'welcome',
+    idempotencyKey: `welcome-${args.customerEmail.toLowerCase()}`,
+    replyTo: args.settings.contact.email,
+  });
+}
 
-    return res.ok;
-  } catch (err) {
-    console.error('Mailgun quote received email error:', err);
-    return false;
-  }
+export async function sendQuoteReceivedEmail(quote: Quote, settings: StoreSettings, hasMeasurements = false): Promise<boolean> {
+  const budget =
+    quote.budget_min_kobo || quote.budget_max_kobo
+      ? `${formatNaira(quote.budget_min_kobo || 0)} – ${formatNaira(quote.budget_max_kobo || quote.budget_min_kobo || 0)}`
+      : 'To be discussed';
+
+  const html = renderEmail('quotation-received', {
+    ...commonVars(settings),
+    customer_name: quote.customer_name,
+    quote_reference: quote.reference,
+    garment: quote.garment,
+    occasion: quote.occasion,
+    event_date: quote.event_date ? new Date(quote.event_date).toLocaleDateString('en-NG', { dateStyle: 'medium' }) : 'Not specified',
+    budget,
+    measurements_status: hasMeasurements ? 'Provided' : 'To be taken at fitting',
+    photo_count: quote.photo_paths?.length ?? 0,
+    contact_preference: quote.contact_preference,
+  });
+
+  return sendMailgunMessage({
+    to: quote.customer_email,
+    subject: `We've received your quote request ${quote.reference}`,
+    html,
+    tag: 'quotation-received',
+    idempotencyKey: `quote-received-${quote.id}`,
+    replyTo: settings.contact.email,
+  });
 }

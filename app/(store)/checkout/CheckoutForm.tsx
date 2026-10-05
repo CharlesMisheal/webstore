@@ -17,7 +17,16 @@ const NIGERIAN_STATES = [
 
 const inputClass = 'w-full px-3 py-2.5 bg-ivory-2 border border-stone rounded focus:ring-1 focus:ring-navy text-xs min-h-[44px]';
 
-export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail: string; signedInName: string }) {
+export function CheckoutForm({
+  signedInEmail,
+  signedInName,
+  testMode = false,
+}: {
+  signedInEmail: string;
+  signedInName: string;
+  /** Server-decided (TEST_ORDER_EMAILS): the order is confirmed without taking payment. */
+  testMode?: boolean;
+}) {
   const searchParams = useSearchParams();
   const { items, subtotalKobo, format } = useCart();
   const { delivery_rules: deliveryRules, contact } = useStoreSettings();
@@ -111,6 +120,13 @@ export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail: s
         Signed in as <strong>{signedInEmail}</strong>. This order will appear under{' '}
         <Link href="/account" className="underline font-semibold">My account</Link> so you can track it.
       </p>
+
+      {testMode && (
+        <p className="text-xs text-amber-900 bg-amber-50 border border-amber-300 rounded px-4 py-3">
+          <strong>Test mode:</strong> no payment will be taken. Your order is confirmed immediately so you can check My account,
+          order tracking and the admin dashboard.
+        </p>
+      )}
 
       <form onSubmit={handleSubmit} className="grid grid-cols-1 lg:grid-cols-12 gap-8" noValidate>
         <div className="lg:col-span-7 space-y-6">
@@ -257,7 +273,15 @@ export function CheckoutForm({ signedInEmail, signedInName }: { signedInEmail: s
                 className="w-full py-4 bg-navy hover:bg-navy-2 disabled:opacity-70 text-ivory font-semibold text-xs rounded shadow-md transition flex items-center justify-center space-x-2 min-h-[48px]"
               >
                 <Lock className="w-4 h-4 text-gold-light" aria-hidden="true" />
-                <span>{isSubmitting ? 'Opening secure Paystack checkout…' : `Pay securely with Paystack · ${format(totalKobo)}`}</span>
+                <span>
+                  {testMode
+                    ? isSubmitting
+                      ? 'Placing test order…'
+                      : `Place test order (no payment) · ${format(totalKobo)}`
+                    : isSubmitting
+                      ? 'Opening secure Paystack checkout…'
+                      : `Pay securely with Paystack · ${format(totalKobo)}`}
+                </span>
                 <ArrowRight className="w-4 h-4" aria-hidden="true" />
               </button>
 

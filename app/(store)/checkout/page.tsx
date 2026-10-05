@@ -1,6 +1,7 @@
 import React, { Suspense } from 'react';
 import { redirect } from 'next/navigation';
 import { getCurrentUser } from '@/lib/auth';
+import { isTestCheckout } from '@/lib/test-orders';
 import { CheckoutForm } from './CheckoutForm';
 
 export const metadata = { title: 'Checkout', robots: { index: false } };
@@ -13,7 +14,7 @@ export default async function CheckoutPage({ searchParams }: { searchParams: { d
 
   return (
     <Suspense fallback={<div className="max-w-7xl mx-auto px-4 py-20 text-center text-xs text-text-3">Loading checkout…</div>}>
-      <CheckoutForm signedInEmail={user.email} signedInName={user.full_name} />
+      <CheckoutForm signedInEmail={user.email} signedInName={user.full_name} testMode={isTestCheckout(user.email)} />
     </Suspense>
   );
 }

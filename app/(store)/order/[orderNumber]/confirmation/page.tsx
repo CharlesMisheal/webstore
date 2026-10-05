@@ -6,6 +6,7 @@ import { formatNaira } from '@/lib/money';
 import { whatsappUrl } from '@/lib/whatsapp';
 import { verifyAndSettle } from '@/lib/payments-live';
 import { isPaystackConfigured } from '@/lib/paystack';
+import { TEST_PAYMENT_CHANNEL } from '@/lib/test-orders';
 import { ClearCartOnSuccess } from '@/components/cart/ClearCartOnSuccess';
 import { CheckCircle2, Clock, XCircle, MessageCircle, Truck, RefreshCw } from 'lucide-react';
 
@@ -47,6 +48,7 @@ export default async function OrderConfirmationPage({ params, searchParams }: Co
   const isCancelled = status === 'cancelled';
   const latestPayment = order.payment;
   const paymentFailed = isPending && (latestPayment?.status === 'failed' || latestPayment?.status === 'abandoned');
+  const isTestOrder = latestPayment?.channel === TEST_PAYMENT_CHANNEL;
 
   const whatsappHref = whatsappUrl(settings.contact.whatsapp, `Hello A-Plus, I just placed order ${order.order_number}.`);
   const checkAgainHref = `/order/${order.order_number}/confirmation${latestPayment?.reference ? `?reference=${encodeURIComponent(latestPayment.reference)}` : ''}`;
@@ -61,7 +63,9 @@ export default async function OrderConfirmationPage({ params, searchParams }: Co
             <div className="w-16 h-16 mx-auto rounded-full bg-emerald-50 text-aplus-success flex items-center justify-center">
               <CheckCircle2 className="w-10 h-10" aria-hidden="true" />
             </div>
-            <span className="text-xs uppercase tracking-widest text-gold-dark font-semibold block">Payment confirmed</span>
+            <span className="text-xs uppercase tracking-widest text-gold-dark font-semibold block">
+              {isTestOrder ? 'Test order confirmed · no payment taken' : 'Payment confirmed'}
+            </span>
             <h1 className="font-serif text-2xl sm:text-3xl text-navy">Thank you, {order.customer_name}!</h1>
             <p className="text-xs sm:text-sm text-text-2 max-w-lg mx-auto leading-relaxed">
               Your order <strong className="text-navy">{order.order_number}</strong> is confirmed. A receipt has been sent to{' '}
@@ -153,7 +157,7 @@ export default async function OrderConfirmationPage({ params, searchParams }: Co
             <span className="font-semibold text-navy">{order.delivery_fee_kobo === 0 ? 'FREE' : formatNaira(order.delivery_fee_kobo)}</span>
           </div>
           <div className="flex justify-between text-base font-serif font-bold text-navy pt-2 border-t border-stone">
-            <span>{isSuccess ? 'Total paid (NGN)' : 'Total due (NGN)'}</span>
+            <span>{isTestOrder ? 'Total (test order, not charged)' : isSuccess ? 'Total paid (NGN)' : 'Total due (NGN)'}</span>
             <span>{formatNaira(order.total_kobo)}</span>
           </div>
         </div>

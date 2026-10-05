@@ -11,6 +11,7 @@ import {
 import { sendOrderConfirmationEmail } from './email';
 import { settleCharge, type ChargeData, type SettleDeps, type SettleOutcome } from './payments';
 import { verifyPaystackTransaction } from './paystack';
+import { TEST_PAYMENT_CHANNEL } from './test-orders';
 
 export const liveSettleDeps: SettleDeps = {
   getPaymentByReference,
@@ -44,6 +45,20 @@ async function removePurchasedItemsFromSavedCart(outcome: SettleOutcome): Promis
 /** Webhook path: payload already signature-verified by the caller. */
 export async function settleFromWebhook(data: ChargeData): Promise<SettleOutcome> {
   const outcome = await settleCharge(liveSettleDeps, data, 'webhook');
+  await removePurchasedItemsFromSavedCart(outcome);
+  return outcome;
+}
+
+/**
+ * Test checkout: settles the order through the normal paid path (stock, saved cart,
+ * confirmation email, audit) without Paystack. Callers MUST check isTestCheckout() first.
+ */
+export async function settleTestOrder(reference: string, amountKobo: number): Promise<SettleOutcome> {
+  const outcome = await settleCharge(
+    liveSettleDeps,
+    { reference, amount: amountKobo, currency: 'NGN', status: 'success', channel: TEST_PAYMENT_CHANNEL },
+    'test'
+  );
   await removePurchasedItemsFromSavedCart(outcome);
   return outcome;
 }

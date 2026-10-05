@@ -13,6 +13,8 @@ import { getCurrentUser } from '@/lib/auth';
 import { buildOrderDraft, CheckoutError, newPaymentReference } from '@/lib/checkout';
 import { initializePaystackTransaction, isPaystackConfigured, PaystackError } from '@/lib/paystack';
 import { generateOrderNumber } from '@/lib/money';
+import { settleTestOrder } from '@/lib/payments-live';
+import { isTestCheckout } from '@/lib/test-orders';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,13 +62,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ message: 'Too many checkout attempts. Please wait a few minutes and try again.' }, { status: 429 });
   }
 
-  if (!isPaystackConfigured()) {
-    return NextResponse.json(
-      { message: 'Online payment is temporarily unavailable. Please order via WhatsApp and we will confirm by bank transfer.', code: 'PAYSTACK_UNCONFIGURED' },
-      { status: 503 }
-    );
-  }
-
   let body: z.infer<typeof schema>;
   try {
     body = schema.parse(await req.json());
@@ -79,6 +74,14 @@ export async function POST(req: NextRequest) {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ message: 'Sign in with Google to check out.', code: 'SIGN_IN_REQUIRED' }, { status: 401 });
+    }
+
+    const testMode = isTestCheckout(user.email);
+    if (!testMode && !isPaystackConfigured()) {
+      return NextResponse.json(
+        { message: 'Online payment is temporarily unavailable. Please order via WhatsApp and we will confirm by bank transfer.', code: 'PAYSTACK_UNCONFIGURED' },
+        { status: 503 }
+      );
     }
 
     const [settings, variants] = await Promise.all([
@@ -123,6 +126,26 @@ export async function POST(req: NextRequest) {
 
     const siteUrl = (process.env.NEXT_PUBLIC_SITE_URL || req.nextUrl.origin).replace(/\/$/, '');
     const callbackUrl = `${siteUrl}/order/${order.order_number}/confirmation`;
+
+    if (testMode) {
+      const outcome = await settleTestOrder(reference, order.total_kobo);
+      await addAuditLog({
+        actor_email: user.email,
+        action: 'order.test_checkout',
+        entity: 'orders',
+        entity_id: order.id,
+        after: { order_number: order.order_number, total_kobo: order.total_kobo, reference, outcome: outcome.kind, note: 'No payment taken (TEST_ORDER_EMAILS)' },
+        ip,
+      });
+      return NextResponse.json({
+        success: true,
+        test: true,
+        authorization_url: `/order/${order.order_number}/confirmation`,
+        reference,
+        order_number: order.order_number,
+        total_kobo: order.total_kobo,
+      });
+    }
 
     const init = await initializePaystackTransaction({
       email: order.customer_email,

@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { errorResponse, requireAdmin } from '@/lib/admin-guard';
 import { addAuditLog, createRefund, getPaymentByReference, updatePaymentRefundStatus } from '@/lib/db';
 import { createPaystackRefund, PaystackError } from '@/lib/paystack';
+import { TEST_PAYMENT_CHANNEL } from '@/lib/test-orders';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,6 +24,9 @@ export async function POST(req: NextRequest) {
     const payment = await getPaymentByReference(body.reference);
     if (!payment || !payment.order) return NextResponse.json({ message: 'Payment not found' }, { status: 404 });
     if (payment.status !== 'success') return NextResponse.json({ message: 'Only successful payments can be refunded' }, { status: 409 });
+    if (payment.channel === TEST_PAYMENT_CHANNEL) {
+      return NextResponse.json({ message: 'This is a test order: no money was taken, so there is nothing to refund. Cancel the order instead.' }, { status: 409 });
+    }
     if (payment.refund_status === 'full') return NextResponse.json({ message: 'This payment has already been fully refunded' }, { status: 409 });
 
     const amount = body.amount_kobo ?? payment.amount_kobo;

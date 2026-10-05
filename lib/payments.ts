@@ -45,7 +45,7 @@ export type SettleOutcome =
 export type ChargeData = Pick<PaystackTransactionData, 'reference' | 'amount' | 'currency' | 'status' | 'channel'> &
   Partial<Omit<PaystackTransactionData, 'reference' | 'amount' | 'currency' | 'status' | 'channel'>>;
 
-export async function settleCharge(deps: SettleDeps, data: ChargeData, source: 'webhook' | 'verify'): Promise<SettleOutcome> {
+export async function settleCharge(deps: SettleDeps, data: ChargeData, source: 'webhook' | 'verify' | 'test'): Promise<SettleOutcome> {
   const reference = String(data.reference || '');
   if (!reference) return { kind: 'unknown_reference' };
 

@@ -28,7 +28,7 @@ interface ProductDetailViewProps {
 }
 
 export function ProductDetailView({ product, relatedProducts, reviews = [] }: ProductDetailViewProps) {
-  const { addItem, format, totalCount, setIsCartOpen } = useCart();
+  const { addItem, format, totalCount, setIsCartOpen, isSignedIn } = useCart();
   const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { contact, delivery_rules: deliveryRules } = useStoreSettings();
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
@@ -70,6 +70,10 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
 
   const handleAddToCart = () => {
     setAddError('');
+    if (!isSignedIn) {
+      window.location.assign(`/auth/login?next=${encodeURIComponent(`/product/${product.slug}`)}`);
+      return;
+    }
     if (!selectedVariant) {
       setAddError('Please select a size.');
       return;
@@ -78,7 +82,7 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
       setAddError(`Size ${selectedVariant.size_label} is sold out ready-to-wear${product.is_bespoke ? ' — choose Custom Bespoke to have it made for you.' : '.'}`);
       return;
     }
-    addItem({
+    const added = addItem({
       product_id: product.id,
       variant_id: selectedVariant.id,
       name: product.name,
@@ -89,6 +93,10 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
       image_url: currentImage.storage_path,
       slug: product.slug,
     });
+    if (!added) {
+      window.location.assign(`/auth/login?next=${encodeURIComponent(`/product/${product.slug}`)}`);
+      return;
+    }
     setAddedToast(true);
     if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
     toastTimerRef.current = setTimeout(() => setAddedToast(false), 6000);
@@ -358,8 +366,19 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
               className="w-full py-4 bg-navy hover:bg-navy-2 disabled:opacity-60 disabled:cursor-not-allowed text-ivory font-semibold text-sm rounded shadow-lg transition flex items-center justify-center space-x-2 touch-target"
             >
               <ShoppingBag className="w-5 h-5 text-gold-light" aria-hidden="true" />
-              <span>{outOfStock && !product.is_bespoke ? 'Sold out' : `Add to bag • ${format(product.price_kobo * quantity)}`}</span>
+              <span>
+                {outOfStock && !product.is_bespoke
+                  ? 'Sold out'
+                  : isSignedIn
+                    ? `Add to bag • ${format(product.price_kobo * quantity)}`
+                    : 'Sign in to add to bag'}
+              </span>
             </button>
+            {!isSignedIn && !(outOfStock && !product.is_bespoke) && (
+              <p className="text-[11px] text-text-3 text-center">
+                Sign in with Google to save items to your bag and track your orders. You&apos;ll come straight back here.
+              </p>
+            )}
 
             {addedToast && (
               <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-aplus-success text-xs font-medium rounded space-y-2 animate-in fade-in">

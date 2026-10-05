@@ -6,7 +6,7 @@ import Image from 'next/image';
 import { X, Trash2, ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCart } from './CartContext';
 export function CartDrawer() {
-  const { items, subtotalKobo, format, isCartOpen, setIsCartOpen, updateQty, removeItem } = useCart();
+  const { items, subtotalKobo, format, isCartOpen, setIsCartOpen, updateQty, removeItem, isSignedIn } = useCart();
 
   // Escape key closes drawer
   useEffect(() => {
@@ -48,7 +48,23 @@ export function CartDrawer() {
 
           {/* Cart Items List */}
           <div className="flex-1 overflow-y-auto px-6 py-4 divide-y divide-stone">
-            {items.length === 0 ? (
+            {!isSignedIn ? (
+              <div className="h-full flex flex-col items-center justify-center text-center py-12">
+                <div className="w-16 h-16 rounded-full bg-ivory-2 border border-stone flex items-center justify-center text-text-3 mb-4">
+                  <ShoppingBag className="w-8 h-8" />
+                </div>
+                <h3 className="font-serif text-xl text-navy mb-2">Sign in to start your bag</h3>
+                <p className="text-sm text-text-2 max-w-xs mb-6">
+                  Your bag is saved to your account, so it follows you between the website and the app.
+                </p>
+                <a
+                  href={`/auth/login?next=${encodeURIComponent(typeof window !== 'undefined' ? window.location.pathname : '/shop')}`}
+                  className="px-6 py-3 bg-navy text-ivory font-medium rounded hover:bg-navy-2 transition"
+                >
+                  Sign in / Create account
+                </a>
+              </div>
+            ) : items.length === 0 ? (
               <div className="h-full flex flex-col items-center justify-center text-center py-12">
                 <div className="w-16 h-16 rounded-full bg-ivory-2 border border-stone flex items-center justify-center text-text-3 mb-4">
                   <ShoppingBag className="w-8 h-8" />

@@ -208,10 +208,6 @@ export default function CartPage() {
                 <span>Proceed to Checkout</span>
                 <ArrowRight className="w-4 h-4" />
               </Link>
-              <p className="text-[10px] text-text-3 text-center">
-                You&apos;ll sign in or create an account before paying, so you can track your order.
-              </p>
-
               <a
                 href={whatsappHref}
                 target="_blank"

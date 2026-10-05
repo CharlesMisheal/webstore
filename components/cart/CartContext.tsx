@@ -19,7 +19,10 @@ interface CartContextType {
   format: (kobo: number) => string;
   isCartOpen: boolean;
   setIsCartOpen: (open: boolean) => void;
-  addItem: (item: Omit<CartItem, 'id'>) => void;
+  /** The bag is for signed-in shoppers only; signed-out visitors see an empty bag and a sign-in prompt. */
+  isSignedIn: boolean;
+  /** Returns false (and adds nothing) when the shopper is not signed in. */
+  addItem: (item: Omit<CartItem, 'id'>) => boolean;
   updateQty: (itemId: string, qty: number) => void;
   removeItem: (itemId: string) => void;
   clearCart: () => void;
@@ -54,8 +57,18 @@ async function callCartApi(init?: RequestInit): Promise<CartResponse | null> {
   }
 }
 
-export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { children: React.ReactNode; fxRates?: FxRates }) {
+export function CartProvider({
+  children,
+  fxRates = DEFAULT_FX_RATES,
+  initialSignedIn = false,
+}: {
+  children: React.ReactNode;
+  fxRates?: FxRates;
+  /** Server-rendered session state, so the right button shows on first paint. */
+  initialSignedIn?: boolean;
+}) {
   const [items, setItems] = useState<CartItem[]>([]);
+  const [isSignedIn, setIsSignedIn] = useState(initialSignedIn);
   const [currency, setCurrencyState] = useState<'NGN' | 'USD' | 'GBP'>('NGN');
   const [isCartOpen, setIsCartOpen] = useState(false);
   const [isInitialized, setIsInitialized] = useState(false);
@@ -95,6 +108,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
 
   const signedOut = useCallback(() => {
     syncUserRef.current = null;
+    setIsSignedIn(false);
     setQueue([]);
     setItems([]);
     setOwner(null);
@@ -203,6 +217,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       }
       if (!data.signedIn) {
         syncUserRef.current = null;
+        setIsSignedIn(false);
         setQueue([]);
         // Signed out since this cart was cached: don't leave the account's bag on this device.
         if (owner) signedOut();
@@ -210,6 +225,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       }
 
       syncUserRef.current = data.userId;
+      setIsSignedIn(true);
       setOwner(data.userId);
 
       if (owner === data.userId) {
@@ -290,8 +306,10 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
   };
 
   const addItem = (newItem: Omit<CartItem, 'id'>) => {
+    if (!isSignedIn) return false;
     // No auto-open: shoppers keep browsing and adding; the bag opens from the navbar or "View bag".
     record({ type: 'add', item: { ...newItem, id: lineId(newItem.variant_id, newItem.fit_type) } });
+    return true;
   };
 
   const updateQty = (itemId: string, qty: number) => {
@@ -315,19 +333,23 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     record({ type: 'clear' }, true);
   };
 
-  const subtotalKobo = items.reduce(
+  // A bag left on the device from before sign-in became required stays hidden, then merges into the
+  // account's bag on sign-in (see the initial load).
+  const visibleItems = isSignedIn ? items : [];
+
+  const subtotalKobo = visibleItems.reduce(
     (sum, item) => sum + calculateLineTotal(item.unit_price_kobo, item.qty),
     0
   );
 
-  const totalCount = items.reduce((sum, item) => sum + item.qty, 0);
+  const totalCount = visibleItems.reduce((sum, item) => sum + item.qty, 0);
 
   const format = (kobo: number) => formatMoney(kobo, currency, fxRates);
 
   return (
     <CartContext.Provider
       value={{
-        items,
+        items: visibleItems,
         subtotalKobo,
         totalCount,
         currency,
@@ -336,6 +358,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
         format,
         isCartOpen,
         setIsCartOpen,
+        isSignedIn,
         addItem,
         updateQty,
         removeItem,

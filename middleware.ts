@@ -29,7 +29,7 @@ const cookieOpts = {
 
 /**
  * 1. Refreshes the Supabase session cookie on every request (required by @supabase/ssr).
- * 2. UX-only redirects: unauthenticated /admin/* -> /admin/login, /account and /checkout -> /auth/login.
+ * 2. UX-only redirects: unauthenticated /admin/* -> /admin/login, /account, /cart and /checkout -> /auth/login.
  *    The real gate is requireAdmin() inside every admin page/action/route.
  * 3. Slides the 30-minute admin idle timer on each admin navigation.
  *
@@ -118,7 +118,7 @@ async function handle(request: NextRequest) {
     if (!Number.isFinite(started)) response.cookies.set(ADMIN_STARTED_COOKIE, String(now), cookieOpts);
   }
 
-  if ((pathname.startsWith('/account') || pathname.startsWith('/checkout')) && !user) {
+  if ((pathname.startsWith('/account') || pathname.startsWith('/checkout') || pathname === '/cart') && !user) {
     return redirectWithCookies(`/auth/login?next=${encodeURIComponent(pathname + search)}`);
   }
 

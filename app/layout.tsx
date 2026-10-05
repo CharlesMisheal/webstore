@@ -5,6 +5,7 @@ import { CartProvider } from '@/components/cart/CartContext';
 import { StoreSettingsProvider } from '@/components/providers/StoreSettingsProvider';
 import { NativeAppLinks } from '@/components/providers/NativeAppLinks';
 import { getStoreSettings } from '@/lib/db';
+import { getCurrentUser } from '@/lib/auth';
 
 const playfair = Playfair_Display({
   subsets: ['latin'],
@@ -39,13 +40,15 @@ export const metadata: Metadata = {
  * app/(store)/layout.tsx and the admin chrome in app/(admin)/admin/layout.tsx.
  */
 export default async function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
-  const settings = await getStoreSettings();
+  const [settings, user] = await Promise.all([getStoreSettings(), getCurrentUser()]);
 
   return (
     <html lang="en" className={`${playfair.variable} ${inter.variable}`}>
       <body className="min-h-screen flex flex-col bg-ivory text-text font-sans antialiased selection:bg-gold-light selection:text-navy">
         <StoreSettingsProvider settings={settings}>
-          <CartProvider fxRates={settings.fx_rates}>{children}</CartProvider>
+          <CartProvider fxRates={settings.fx_rates} initialSignedIn={Boolean(user)}>
+            {children}
+          </CartProvider>
           <NativeAppLinks />
         </StoreSettingsProvider>
       </body>

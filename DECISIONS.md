@@ -78,4 +78,7 @@ Only two real product photos exist (`feature-suit-ivory.jpg`, `feature-suit-purp
 
 - Cloud image upload from the admin product editor (it accepts a URL/path). Supabase Storage is the intended target; wiring the upload UI is a follow-up.
 - Customer-side quote acceptance / deposit payment flow (the owner marks quotes accepted after a WhatsApp conversation).
-- Cart persistence to the `carts` table (cart lives in localStorage; the table exists for a later signed-in sync).
+
+## D20 — Cart follows the signed-in shopper across devices
+
+Signed-in shoppers' bags are saved in `carts` / `cart_items` via `GET`/`PUT /api/cart` (service-role, keyed by the session user; prices are re-read from the catalogue, never accepted from the client). localStorage stays as an instant-paint cache tagged with the owning user id. On sign-in a guest bag is merged into the saved one; on sign-out the device copy is cleared. Other devices pick up changes on focus/visibility and every 30 s while visible. Guests keep a local-only bag.

@@ -17,6 +17,8 @@ import { DEFAULT_STORE_SETTINGS } from './store-defaults';
 import {
   AuditLogEntry,
   Booking,
+  CartItem,
+  FitType,
   BookingStatus,
   Category,
   ContactMessage,
@@ -1026,6 +1028,107 @@ export async function getAuditLogsForEntity(entity: string, entityId: string): P
     const res = await db().from('audit_log').select('*').eq('entity', entity).eq('entity_id', entityId).order('created_at', { ascending: false });
     return (must(res, 'getAuditLogsForEntity') as Row[]).map((r) => ({ ...r, id: Number(r.id), ip: r.ip ?? undefined }) as AuditLogEntry);
   }, []);
+}
+
+// ==================== SAVED CARTS (signed-in shoppers) ====================
+
+export interface CartLineInput {
+  variant_id: string;
+  qty: number;
+  fit_type: FitType;
+}
+
+export const MAX_CART_LINE_QTY = 20;
+
+export function cartLineId(variantId: string, fitType: FitType): string {
+  return `${variantId}_${fitType}`;
+}
+
+async function findUserCartId(userId: string): Promise<string | null> {
+  const res = await db()
+    .from('carts')
+    .select('id')
+    .eq('user_id', userId)
+    .order('created_at', { ascending: true })
+    .limit(1)
+    .maybeSingle();
+  if (res.error) throw new Error(`[db] findUserCartId: ${res.error.message}`);
+  return res.data?.id ?? null;
+}
+
+/** Turns stored lines into display-ready cart items using current catalogue data; drops hidden/archived/deleted products. */
+async function hydrateCartLines(lines: CartLineInput[]): Promise<CartItem[]> {
+  const variants = await getVariantsByIds(Array.from(new Set(lines.map((l) => l.variant_id))));
+  const byId = new Map(variants.map((v) => [v.id, v]));
+  const items: CartItem[] = [];
+  for (const line of lines) {
+    const v = byId.get(line.variant_id);
+    if (!v || !v.product.is_visible || v.product.archived_at) continue;
+    const cover = v.product.images.find((i) => i.is_cover) ?? v.product.images[0];
+    items.push({
+      id: cartLineId(v.id, line.fit_type),
+      product_id: v.product.id,
+      variant_id: v.id,
+      name: v.product.name,
+      size_label: v.size_label,
+      fit_type: line.fit_type,
+      unit_price_kobo: v.product.price_kobo,
+      qty: line.qty,
+      image_url: cover?.storage_path ?? '',
+      slug: v.product.slug,
+    });
+  }
+  return items;
+}
+
+export async function getUserCart(userId: string): Promise<CartItem[]> {
+  const cartId = await findUserCartId(userId);
+  if (!cartId) return [];
+  const res = await db()
+    .from('cart_items')
+    .select('variant_id, qty, fit_type')
+    .eq('cart_id', cartId)
+    .order('created_at', { ascending: true });
+  const rows = must(res, 'getUserCart') as Row[];
+  return hydrateCartLines(rows.map((r) => ({ variant_id: r.variant_id, qty: Number(r.qty), fit_type: r.fit_type as FitType })));
+}
+
+/** Replaces the shopper's saved cart with `lines` (duplicates merged, unknown variants dropped). Returns the saved cart. */
+export async function replaceUserCart(userId: string, lines: CartLineInput[]): Promise<CartItem[]> {
+  const merged = new Map<string, CartLineInput>();
+  for (const line of lines) {
+    const key = cartLineId(line.variant_id, line.fit_type);
+    const prev = merged.get(key);
+    merged.set(key, { ...line, qty: Math.min(MAX_CART_LINE_QTY, (prev?.qty ?? 0) + line.qty) });
+  }
+  const items = await hydrateCartLines(Array.from(merged.values()));
+
+  let cartId = await findUserCartId(userId);
+  if (!cartId) {
+    const created = await db().from('carts').insert({ user_id: userId }).select('id').single();
+    cartId = must(created, 'replaceUserCart.createCart').id as string;
+  }
+
+  const del = await db().from('cart_items').delete().eq('cart_id', cartId);
+  if (del.error) throw new Error(`[db] replaceUserCart.clear: ${del.error.message}`);
+  if (items.length > 0) {
+    const base = Date.now();
+    const ins = await db()
+      .from('cart_items')
+      .insert(
+        items.map((i, idx) => ({
+          cart_id: cartId,
+          product_id: i.product_id,
+          variant_id: i.variant_id,
+          qty: i.qty,
+          fit_type: i.fit_type,
+          created_at: new Date(base + idx).toISOString(),
+        }))
+      );
+    if (ins.error) throw new Error(`[db] replaceUserCart.insert: ${ins.error.message}`);
+  }
+  await db().from('carts').update({ updated_at: new Date().toISOString() }).eq('id', cartId);
+  return items;
 }
 
 // ==================== RATE LIMITING ====================

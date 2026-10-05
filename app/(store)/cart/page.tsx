@@ -48,9 +48,14 @@ export default function CartPage() {
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 sm:py-14 space-y-8">
-      <div className="border-b border-stone pb-4">
-        <h1 className="font-serif text-3xl sm:text-4xl text-navy">Shopping Bag</h1>
-        <p className="text-xs text-text-3 mt-1">Review your selected garments before secure checkout.</p>
+      <div className="border-b border-stone pb-4 flex flex-col sm:flex-row sm:items-end sm:justify-between gap-2">
+        <div>
+          <h1 className="font-serif text-3xl sm:text-4xl text-navy">Shopping Bag</h1>
+          <p className="text-xs text-text-3 mt-1">Review your selected garments before secure checkout. Your bag is saved.</p>
+        </div>
+        <Link href="/shop" className="text-xs font-semibold text-navy underline hover:text-gold-dark">
+          ← Continue shopping
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8">

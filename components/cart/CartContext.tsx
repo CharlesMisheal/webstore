@@ -30,6 +30,8 @@ const CartContext = createContext<CartContextType | undefined>(undefined);
 const CART_STORAGE_KEY = 'aplus_cart_v1';
 /** Which signed-in user the cached cart belongs to (absent = guest cart). */
 const CART_OWNER_STORAGE_KEY = 'aplus_cart_owner_v1';
+/** Changes the server hasn't confirmed yet (offline, app closed mid-save); replayed on the next visit. */
+const CART_PENDING_STORAGE_KEY = 'aplus_cart_pending_v1';
 const CURRENCY_STORAGE_KEY = 'aplus_currency_v1';
 const PUSH_DEBOUNCE_MS = 400;
 const REFRESH_INTERVAL_MS = 30_000;
@@ -68,6 +70,8 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
   const queueRef = useRef<CartOp[]>([]);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const inFlightRef = useRef(false);
+  /** Batch currently being sent; kept in storage until the server confirms it. */
+  const inFlightBatchRef = useRef<CartOp[]>([]);
 
   const setOwner = (userId: string | null) => {
     try {
@@ -78,12 +82,23 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     }
   };
 
+  const setQueue = useCallback((ops: CartOp[]) => {
+    queueRef.current = ops;
+    const unconfirmed = [...inFlightBatchRef.current, ...ops];
+    try {
+      if (unconfirmed.length > 0) localStorage.setItem(CART_PENDING_STORAGE_KEY, JSON.stringify(unconfirmed));
+      else localStorage.removeItem(CART_PENDING_STORAGE_KEY);
+    } catch {
+      /* storage unavailable */
+    }
+  }, []);
+
   const signedOut = useCallback(() => {
     syncUserRef.current = null;
-    queueRef.current = [];
+    setQueue([]);
     setItems([]);
     setOwner(null);
-  }, []);
+  }, [setQueue]);
 
   /** Sends queued changes. `urgent` skips the debounce and uses keepalive so it survives the page closing. */
   const flush = useCallback(
@@ -94,7 +109,9 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       }
       if (!syncUserRef.current || inFlightRef.current || queueRef.current.length === 0) return;
 
+      // The batch stays in storage until the server confirms it, so closing the app mid-save loses nothing.
       const batch = queueRef.current.slice(0, 100);
+      inFlightBatchRef.current = batch;
       queueRef.current = queueRef.current.slice(batch.length);
       inFlightRef.current = true;
       const data = await callCartApi({
@@ -104,13 +121,16 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
         keepalive: urgent,
       });
       inFlightRef.current = false;
+      inFlightBatchRef.current = [];
 
       if (!data) {
         // Keep the changes and retry on the next change, focus or refresh tick.
-        queueRef.current = [...batch, ...queueRef.current];
+        setQueue([...batch, ...queueRef.current]);
         return;
       }
-      // Dropped; the next focus/refresh tick resyncs the bag from the server.
+      // Confirmed (or rejected as invalid, which retrying can't fix): forget the batch.
+      setQueue(queueRef.current);
+      // Rejected: the next focus/refresh tick resyncs the bag from the server.
       if ('rejected' in data) return;
       if (!data.signedIn) {
         signedOut();
@@ -119,14 +139,14 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       setItems(applyOps(data.items, queueRef.current));
       if (queueRef.current.length > 0) void flush();
     },
-    [signedOut]
+    [signedOut, setQueue]
   );
 
   const record = useCallback(
     (op: CartOp, urgent = false) => {
       setItems((prev) => applyOps(prev, [op]));
       if (loadedRef.current && !syncUserRef.current) return;
-      queueRef.current.push(op);
+      setQueue([...queueRef.current, op]);
       if (!loadedRef.current) return;
       if (urgent) {
         void flush(true);
@@ -135,17 +155,23 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
       pushTimerRef.current = setTimeout(() => void flush(), PUSH_DEBOUNCE_MS);
     },
-    [flush]
+    [flush, setQueue]
   );
 
   // Initial load: show the cached cart immediately, then reconcile with the account's saved cart.
   useEffect(() => {
     let localItems: CartItem[] = [];
     let owner: string | null = null;
+    let pending: CartOp[] = [];
     try {
       const stored = localStorage.getItem(CART_STORAGE_KEY);
       if (stored) localItems = mergeItems(JSON.parse(stored));
       owner = localStorage.getItem(CART_OWNER_STORAGE_KEY);
+      const storedPending = owner ? localStorage.getItem(CART_PENDING_STORAGE_KEY) : null;
+      if (storedPending) {
+        const parsed = JSON.parse(storedPending);
+        if (Array.isArray(parsed)) pending = parsed as CartOp[];
+      }
       const storedCurrency = localStorage.getItem(CURRENCY_STORAGE_KEY);
       if (storedCurrency === 'USD' || storedCurrency === 'GBP' || storedCurrency === 'NGN') {
         setCurrencyState(storedCurrency);
@@ -154,6 +180,8 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       console.error('Failed to load cart from storage', e);
     }
     setItems(localItems);
+    // Unsent changes from last visit go first; anything done while loading is appended by record().
+    queueRef.current = pending;
     setIsInitialized(true);
 
     let cancelled = false;
@@ -163,13 +191,19 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       loadedRef.current = true;
 
       if (!data || 'rejected' in data) {
-        // Server unreachable: behave as a local-only cart for this page view.
-        queueRef.current = [];
+        if (owner) {
+          // Offline but this bag belongs to a signed-in shopper: keep queuing; the refresh tick
+          // sends everything once the connection is back.
+          syncUserRef.current = owner;
+          setQueue(queueRef.current);
+        } else {
+          setQueue([]);
+        }
         return;
       }
       if (!data.signedIn) {
         syncUserRef.current = null;
-        queueRef.current = [];
+        setQueue([]);
         // Signed out since this cart was cached: don't leave the account's bag on this device.
         if (owner) signedOut();
         return;
@@ -179,13 +213,14 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       setOwner(data.userId);
 
       if (owner === data.userId) {
-        // Cached copy of this account's bag: the server is the truth, plus anything changed while loading.
+        // Cached copy of this account's bag: the server is the truth, plus unsent/in-load changes.
+        setQueue(queueRef.current);
       } else if (!owner) {
         // Guest bag from before sign-in (including changes made while loading): fold it into the saved bag.
-        queueRef.current = itemsRef.current.map((item) => ({ type: 'add', item }));
+        setQueue(itemsRef.current.map((item) => ({ type: 'add', item })));
       } else {
         // Another account's bag on a shared device: discard it.
-        queueRef.current = [];
+        setQueue([]);
       }
       setItems(applyOps(data.items, queueRef.current));
       void flush();
@@ -194,7 +229,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     return () => {
       cancelled = true;
     };
-  }, [flush, signedOut]);
+  }, [flush, signedOut, setQueue]);
 
   // Cache locally (instant paint, offline) on every change.
   useEffect(() => {
@@ -229,6 +264,8 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
       else void refresh();
     };
     const onPageHide = () => void flush(true);
+    const onOnline = () => void flush();
+    window.addEventListener('online', onOnline);
 
     document.addEventListener('visibilitychange', onVisibility);
     window.addEventListener('pagehide', onPageHide);
@@ -237,6 +274,7 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
       window.removeEventListener('pagehide', onPageHide);
+      window.removeEventListener('online', onOnline);
       window.removeEventListener('focus', refresh);
       clearInterval(interval);
     };
@@ -252,8 +290,8 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
   };
 
   const addItem = (newItem: Omit<CartItem, 'id'>) => {
+    // No auto-open: shoppers keep browsing and adding; the bag opens from the navbar or "View bag".
     record({ type: 'add', item: { ...newItem, id: lineId(newItem.variant_id, newItem.fit_type) } });
-    setIsCartOpen(true);
   };
 
   const updateQty = (itemId: string, qty: number) => {

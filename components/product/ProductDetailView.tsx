@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import Image from 'next/image';
 import Link from 'next/link';
 import { Product, ProductVariant, FitType, Review } from '@/lib/types';
@@ -28,7 +28,8 @@ interface ProductDetailViewProps {
 }
 
 export function ProductDetailView({ product, relatedProducts, reviews = [] }: ProductDetailViewProps) {
-  const { addItem, format } = useCart();
+  const { addItem, format, totalCount, setIsCartOpen } = useCart();
+  const toastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const { contact, delivery_rules: deliveryRules } = useStoreSettings();
   const [selectedImageIdx, setSelectedImageIdx] = useState(0);
   const [selectedVariant, setSelectedVariant] = useState<ProductVariant | null>(
@@ -89,8 +90,13 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
       slug: product.slug,
     });
     setAddedToast(true);
-    setTimeout(() => setAddedToast(false), 3000);
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = setTimeout(() => setAddedToast(false), 6000);
   };
+
+  useEffect(() => () => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+  }, []);
 
   // WhatsApp order link prefill (number comes from store settings)
   const productPath = `/product/${product.slug}`;
@@ -356,12 +362,19 @@ export function ProductDetailView({ product, relatedProducts, reviews = [] }: Pr
             </button>
 
             {addedToast && (
-              <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-aplus-success text-xs font-medium rounded flex items-center justify-between animate-in fade-in">
+              <div role="status" className="p-3 bg-emerald-50 border border-emerald-200 text-aplus-success text-xs font-medium rounded space-y-2 animate-in fade-in">
                 <span className="flex items-center space-x-2">
                   <Check className="w-4 h-4" aria-hidden="true" />
-                  <span>Added to your bag.</span>
+                  <span>
+                    Added to your bag · {totalCount} {totalCount === 1 ? 'item' : 'items'} saved. Pick another size or keep shopping.
+                  </span>
                 </span>
-                <Link href="/cart" className="underline font-semibold">View bag</Link>
+                <div className="flex items-center gap-4 pl-6">
+                  <Link href="/shop" className="underline font-semibold">Continue shopping</Link>
+                  <button type="button" onClick={() => setIsCartOpen(true)} className="underline font-semibold">
+                    View bag &amp; checkout
+                  </button>
+                </div>
               </div>
             )}
             {addError && (

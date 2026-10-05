@@ -5,10 +5,8 @@ import Link from 'next/link';
 import Image from 'next/image';
 import { X, Trash2, ShoppingBag, ArrowRight } from 'lucide-react';
 import { useCart } from './CartContext';
-import { formatMoney } from '@/lib/money';
-
 export function CartDrawer() {
-  const { items, subtotalKobo, currency, isCartOpen, setIsCartOpen, updateQty, removeItem } = useCart();
+  const { items, subtotalKobo, format, isCartOpen, setIsCartOpen, updateQty, removeItem } = useCart();
 
   // Escape key closes drawer
   useEffect(() => {
@@ -132,7 +130,7 @@ export function CartDrawer() {
 
                       {/* Price */}
                       <span className="font-semibold text-navy text-sm">
-                        {formatMoney(item.unit_price_kobo * item.qty, currency)}
+                        {format(item.unit_price_kobo * item.qty)}
                       </span>
                     </div>
                   </div>
@@ -148,7 +146,7 @@ export function CartDrawer() {
                 <div className="flex justify-between text-sm text-text-2">
                   <span>Subtotal</span>
                   <span className="font-semibold text-navy text-base">
-                    {formatMoney(subtotalKobo, currency)}
+                    {format(subtotalKobo)}
                   </span>
                 </div>
                 <p className="text-xs text-text-3">
@@ -173,6 +171,14 @@ export function CartDrawer() {
                 >
                   View Full Cart
                 </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setIsCartOpen(false)}
+                  className="w-full py-2 text-center text-xs font-medium text-text-2 hover:text-navy underline"
+                >
+                  Continue shopping · your bag is saved
+                </button>
               </div>
             </div>
           )}

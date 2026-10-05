@@ -1090,45 +1090,97 @@ export async function getUserCart(userId: string): Promise<CartItem[]> {
     .eq('cart_id', cartId)
     .order('created_at', { ascending: true });
   const rows = must(res, 'getUserCart') as Row[];
-  return hydrateCartLines(rows.map((r) => ({ variant_id: r.variant_id, qty: Number(r.qty), fit_type: r.fit_type as FitType })));
-}
-
-/** Replaces the shopper's saved cart with `lines` (duplicates merged, unknown variants dropped). Returns the saved cart. */
-export async function replaceUserCart(userId: string, lines: CartLineInput[]): Promise<CartItem[]> {
+  // Two devices adding the same line at the same instant can leave duplicate rows; show them as one line.
   const merged = new Map<string, CartLineInput>();
-  for (const line of lines) {
+  for (const r of rows) {
+    const line = { variant_id: r.variant_id as string, qty: Number(r.qty), fit_type: r.fit_type as FitType };
     const key = cartLineId(line.variant_id, line.fit_type);
     const prev = merged.get(key);
     merged.set(key, { ...line, qty: Math.min(MAX_CART_LINE_QTY, (prev?.qty ?? 0) + line.qty) });
   }
-  const items = await hydrateCartLines(Array.from(merged.values()));
+  return hydrateCartLines(Array.from(merged.values()));
+}
 
-  let cartId = await findUserCartId(userId);
-  if (!cartId) {
-    const created = await db().from('carts').insert({ user_id: userId }).select('id').single();
-    cartId = must(created, 'replaceUserCart.createCart').id as string;
+/**
+ * One change to a saved cart. Changes are applied per line, so edits to different
+ * lines from different devices never overwrite each other.
+ */
+export type CartOp =
+  | { type: 'add'; variant_id: string; fit_type: FitType; qty: number }
+  | { type: 'set'; variant_id: string; fit_type: FitType; qty: number }
+  | { type: 'remove'; variant_id: string; fit_type: FitType }
+  | { type: 'clear' };
+
+async function getOrCreateUserCartId(userId: string): Promise<string> {
+  const existing = await findUserCartId(userId);
+  if (existing) return existing;
+  const created = await db().from('carts').insert({ user_id: userId }).select('id').single();
+  return must(created, 'getOrCreateUserCartId').id as string;
+}
+
+/** Sets one line's quantity (0 deletes it), collapsing any duplicate rows for that line. */
+async function writeCartLine(cartId: string, variantId: string, fitType: FitType, nextQty: (current: number) => number): Promise<void> {
+  const res = await db()
+    .from('cart_items')
+    .select('id, qty')
+    .eq('cart_id', cartId)
+    .eq('variant_id', variantId)
+    .eq('fit_type', fitType)
+    .order('created_at', { ascending: true });
+  const rows = must(res, 'writeCartLine.read') as Row[];
+  const current = rows.reduce((sum, r) => sum + Number(r.qty), 0);
+  const qty = Math.max(0, Math.min(MAX_CART_LINE_QTY, Math.floor(nextQty(current))));
+
+  if (qty === 0) {
+    if (rows.length > 0) {
+      const del = await db().from('cart_items').delete().in('id', rows.map((r) => r.id));
+      if (del.error) throw new Error(`[db] writeCartLine.delete: ${del.error.message}`);
+    }
+    return;
   }
 
-  const del = await db().from('cart_items').delete().eq('cart_id', cartId);
-  if (del.error) throw new Error(`[db] replaceUserCart.clear: ${del.error.message}`);
-  if (items.length > 0) {
-    const base = Date.now();
+  if (rows.length === 0) {
+    const [variant] = await getVariantsByIds([variantId]);
+    if (!variant || !variant.product.is_visible || variant.product.archived_at) return;
     const ins = await db()
       .from('cart_items')
-      .insert(
-        items.map((i, idx) => ({
-          cart_id: cartId,
-          product_id: i.product_id,
-          variant_id: i.variant_id,
-          qty: i.qty,
-          fit_type: i.fit_type,
-          created_at: new Date(base + idx).toISOString(),
-        }))
-      );
-    if (ins.error) throw new Error(`[db] replaceUserCart.insert: ${ins.error.message}`);
+      .insert({ cart_id: cartId, product_id: variant.product.id, variant_id: variantId, fit_type: fitType, qty });
+    if (ins.error) throw new Error(`[db] writeCartLine.insert: ${ins.error.message}`);
+    return;
+  }
+
+  const [keep, ...extras] = rows;
+  const upd = await db().from('cart_items').update({ qty }).eq('id', keep.id);
+  if (upd.error) throw new Error(`[db] writeCartLine.update: ${upd.error.message}`);
+  if (extras.length > 0) await db().from('cart_items').delete().in('id', extras.map((r) => r.id));
+}
+
+/** Applies changes to the shopper's saved cart in order and returns the resulting cart. */
+export async function applyUserCartOps(userId: string, ops: CartOp[]): Promise<CartItem[]> {
+  const cartId = await getOrCreateUserCartId(userId);
+  for (const op of ops) {
+    if (op.type === 'clear') {
+      const del = await db().from('cart_items').delete().eq('cart_id', cartId);
+      if (del.error) throw new Error(`[db] applyUserCartOps.clear: ${del.error.message}`);
+    } else if (op.type === 'remove') {
+      await writeCartLine(cartId, op.variant_id, op.fit_type, () => 0);
+    } else if (op.type === 'set') {
+      await writeCartLine(cartId, op.variant_id, op.fit_type, () => op.qty);
+    } else {
+      await writeCartLine(cartId, op.variant_id, op.fit_type, (current) => current + op.qty);
+    }
   }
   await db().from('carts').update({ updated_at: new Date().toISOString() }).eq('id', cartId);
-  return items;
+  return getUserCart(userId);
+}
+
+/** After a verified payment: take the purchased quantities out of the buyer's saved cart. */
+export async function removePurchasedFromUserCart(userId: string, purchased: CartLineInput[]): Promise<void> {
+  const cartId = await findUserCartId(userId);
+  if (!cartId) return;
+  for (const line of purchased) {
+    await writeCartLine(cartId, line.variant_id, line.fit_type, (current) => current - line.qty);
+  }
 }
 
 // ==================== RATE LIMITING ====================

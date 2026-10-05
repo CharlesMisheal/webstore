@@ -1,8 +1,9 @@
 'use client';
 
 import React, { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
-import { CartItem, DisplayCurrency, FitType } from '@/lib/types';
+import { CartItem, DisplayCurrency } from '@/lib/types';
 import { calculateLineTotal, DEFAULT_FX_RATES, formatMoney } from '@/lib/money';
+import { applyOps, CartOp, lineId, MAX_LINE_QTY, mergeItems, toWireOp } from '@/lib/cart-ops';
 
 type FxRates = { USD: number; GBP: number };
 
@@ -30,36 +31,20 @@ const CART_STORAGE_KEY = 'aplus_cart_v1';
 /** Which signed-in user the cached cart belongs to (absent = guest cart). */
 const CART_OWNER_STORAGE_KEY = 'aplus_cart_owner_v1';
 const CURRENCY_STORAGE_KEY = 'aplus_currency_v1';
-const MAX_LINE_QTY = 20;
 const PUSH_DEBOUNCE_MS = 400;
 const REFRESH_INTERVAL_MS = 30_000;
 
-type CartResponse = { signedIn: false } | { signedIn: true; userId: string; items: CartItem[] };
+type CartResponse =
+  | { signedIn: false }
+  | { signedIn: true; userId: string; items: CartItem[] }
+  /** Server refused the changes as invalid; retrying would never succeed. */
+  | { rejected: true };
 
-const lineId = (variantId: string, fitType: FitType) => `${variantId}_${fitType}`;
-
-/** Order-insensitive fingerprint of what the server stores (variant, fit, qty). */
-function linesKey(items: CartItem[]): string {
-  return JSON.stringify(items.map((i) => `${i.variant_id}|${i.fit_type}|${i.qty}`).sort());
-}
-
-/** Merges lines that share variant + fit, capping quantity. Later lists win on display fields. */
-function mergeItems(...lists: CartItem[][]): CartItem[] {
-  const byId = new Map<string, CartItem>();
-  for (const list of lists) {
-    for (const item of list) {
-      const id = lineId(item.variant_id, item.fit_type);
-      const prev = byId.get(id);
-      byId.set(id, { ...item, id, qty: Math.min(MAX_LINE_QTY, (prev?.qty ?? 0) + item.qty) });
-    }
-  }
-  return Array.from(byId.values());
-}
-
-async function fetchCart(init?: RequestInit): Promise<CartResponse | null> {
+async function callCartApi(init?: RequestInit): Promise<CartResponse | null> {
   try {
     const res = await fetch('/api/cart', { cache: 'no-store', credentials: 'same-origin', ...init });
     if (res.status === 401) return { signedIn: false };
+    if (res.status === 400) return { rejected: true };
     if (!res.ok) return null;
     return (await res.json()) as CartResponse;
   } catch {
@@ -75,13 +60,14 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
 
   const itemsRef = useRef<CartItem[]>([]);
   itemsRef.current = items;
-  /** Signed-in user whose server cart we are syncing with; null = guest (local only). */
+  /** Signed-in user whose saved cart we sync with; null = guest (local only). */
   const syncUserRef = useRef<string | null>(null);
-  /** linesKey of the cart as last confirmed by the server; a differing local cart needs a push. */
-  const serverKeyRef = useRef<string>('');
+  /** False until the first GET /api/cart settles; changes made before then are queued and reconciled. */
+  const loadedRef = useRef(false);
+  /** Changes not yet confirmed by the server. */
+  const queueRef = useRef<CartOp[]>([]);
   const pushTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const pushInFlightRef = useRef(false);
-  const mutatedSinceLoadRef = useRef(false);
+  const inFlightRef = useRef(false);
 
   const setOwner = (userId: string | null) => {
     try {
@@ -92,10 +78,65 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     }
   };
 
-  const applyServerItems = useCallback((serverItems: CartItem[]) => {
-    serverKeyRef.current = linesKey(serverItems);
-    setItems(serverItems);
+  const signedOut = useCallback(() => {
+    syncUserRef.current = null;
+    queueRef.current = [];
+    setItems([]);
+    setOwner(null);
   }, []);
+
+  /** Sends queued changes. `urgent` skips the debounce and uses keepalive so it survives the page closing. */
+  const flush = useCallback(
+    async (urgent = false) => {
+      if (pushTimerRef.current) {
+        clearTimeout(pushTimerRef.current);
+        pushTimerRef.current = null;
+      }
+      if (!syncUserRef.current || inFlightRef.current || queueRef.current.length === 0) return;
+
+      const batch = queueRef.current.slice(0, 100);
+      queueRef.current = queueRef.current.slice(batch.length);
+      inFlightRef.current = true;
+      const data = await callCartApi({
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ops: batch.map(toWireOp) }),
+        keepalive: urgent,
+      });
+      inFlightRef.current = false;
+
+      if (!data) {
+        // Keep the changes and retry on the next change, focus or refresh tick.
+        queueRef.current = [...batch, ...queueRef.current];
+        return;
+      }
+      // Dropped; the next focus/refresh tick resyncs the bag from the server.
+      if ('rejected' in data) return;
+      if (!data.signedIn) {
+        signedOut();
+        return;
+      }
+      setItems(applyOps(data.items, queueRef.current));
+      if (queueRef.current.length > 0) void flush();
+    },
+    [signedOut]
+  );
+
+  const record = useCallback(
+    (op: CartOp, urgent = false) => {
+      setItems((prev) => applyOps(prev, [op]));
+      if (loadedRef.current && !syncUserRef.current) return;
+      queueRef.current.push(op);
+      if (!loadedRef.current) return;
+      if (urgent) {
+        void flush(true);
+        return;
+      }
+      if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
+      pushTimerRef.current = setTimeout(() => void flush(), PUSH_DEBOUNCE_MS);
+    },
+    [flush]
+  );
 
   // Initial load: show the cached cart immediately, then reconcile with the account's saved cart.
   useEffect(() => {
@@ -117,38 +158,43 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
 
     let cancelled = false;
     (async () => {
-      const data = await fetchCart();
-      if (cancelled || !data) return;
+      const data = await callCartApi();
+      if (cancelled) return;
+      loadedRef.current = true;
 
+      if (!data || 'rejected' in data) {
+        // Server unreachable: behave as a local-only cart for this page view.
+        queueRef.current = [];
+        return;
+      }
       if (!data.signedIn) {
         syncUserRef.current = null;
-        if (owner) {
-          // Signed out since this cart was cached: don't leave the account's bag on this device.
-          setItems([]);
-          setOwner(null);
-        }
+        queueRef.current = [];
+        // Signed out since this cart was cached: don't leave the account's bag on this device.
+        if (owner) signedOut();
         return;
       }
 
       syncUserRef.current = data.userId;
       setOwner(data.userId);
-      serverKeyRef.current = linesKey(data.items);
 
-      if (mutatedSinceLoadRef.current) {
-        // Shopper changed the bag while we were loading; keep their edits (plus guest items) and push.
-        setItems((current) => (owner === data.userId ? current : mergeItems(data.items, current)));
-      } else if (!owner && localItems.length > 0) {
-        // Guest bag from before sign-in: fold it into the account's saved bag.
-        setItems(mergeItems(data.items, localItems));
+      if (owner === data.userId) {
+        // Cached copy of this account's bag: the server is the truth, plus anything changed while loading.
+      } else if (!owner) {
+        // Guest bag from before sign-in (including changes made while loading): fold it into the saved bag.
+        queueRef.current = itemsRef.current.map((item) => ({ type: 'add', item }));
       } else {
-        setItems(data.items);
+        // Another account's bag on a shared device: discard it.
+        queueRef.current = [];
       }
+      setItems(applyOps(data.items, queueRef.current));
+      void flush();
     })();
 
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [flush, signedOut]);
 
   // Cache locally (instant paint, offline) on every change.
   useEffect(() => {
@@ -160,64 +206,41 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
     }
   }, [items, isInitialized]);
 
-  // Push local changes to the account's saved cart (debounced).
-  useEffect(() => {
-    if (!isInitialized || !syncUserRef.current) return;
-    if (linesKey(items) === serverKeyRef.current) return;
-
-    if (pushTimerRef.current) clearTimeout(pushTimerRef.current);
-    pushTimerRef.current = setTimeout(async () => {
-      pushTimerRef.current = null;
-      const sent = itemsRef.current;
-      const sentKey = linesKey(sent);
-      pushInFlightRef.current = true;
-      const data = await fetchCart({
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ items: sent.map((i) => ({ variant_id: i.variant_id, qty: i.qty, fit_type: i.fit_type })) }),
-      });
-      pushInFlightRef.current = false;
-      if (!data) return;
-      if (!data.signedIn) {
-        syncUserRef.current = null;
-        return;
-      }
-      serverKeyRef.current = linesKey(data.items);
-      // Adopt server-confirmed details (current prices, dropped products) unless the shopper edited meanwhile.
-      if (linesKey(itemsRef.current) === sentKey) setItems(data.items);
-    }, PUSH_DEBOUNCE_MS);
-  }, [items, isInitialized]);
-
-  // Pick up changes made on other devices when this tab/app comes back into view, and periodically while visible.
+  // Leaving/backgrounding: send pending changes now. Returning: pick up changes made on other devices.
   useEffect(() => {
     const refresh = async () => {
-      if (!syncUserRef.current || pushTimerRef.current || pushInFlightRef.current) return;
-      if (document.visibilityState !== 'visible') return;
-      const data = await fetchCart();
-      if (!data || pushTimerRef.current || pushInFlightRef.current) return;
-      if (!data.signedIn) {
-        syncUserRef.current = null;
-        setItems([]);
-        setOwner(null);
+      if (!syncUserRef.current || document.visibilityState !== 'visible') return;
+      if (queueRef.current.length > 0) {
+        void flush();
         return;
       }
-      if (data.userId !== syncUserRef.current) return;
-      if (linesKey(itemsRef.current) !== serverKeyRef.current) return;
-      applyServerItems(data.items);
+      if (inFlightRef.current) return;
+      const data = await callCartApi();
+      if (!data || 'rejected' in data || queueRef.current.length > 0 || inFlightRef.current) return;
+      if (!data.signedIn) {
+        signedOut();
+        return;
+      }
+      if (data.userId === syncUserRef.current) setItems(data.items);
     };
 
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') void refresh();
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') void flush(true);
+      else void refresh();
     };
-    document.addEventListener('visibilitychange', onVisible);
+    const onPageHide = () => void flush(true);
+
+    document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pagehide', onPageHide);
     window.addEventListener('focus', refresh);
     const interval = setInterval(refresh, REFRESH_INTERVAL_MS);
     return () => {
-      document.removeEventListener('visibilitychange', onVisible);
+      document.removeEventListener('visibilitychange', onVisibility);
+      window.removeEventListener('pagehide', onPageHide);
       window.removeEventListener('focus', refresh);
       clearInterval(interval);
     };
-  }, [applyServerItems]);
+  }, [flush, signedOut]);
 
   const setCurrency = (c: 'NGN' | 'USD' | 'GBP') => {
     setCurrencyState(c);
@@ -229,30 +252,29 @@ export function CartProvider({ children, fxRates = DEFAULT_FX_RATES }: { childre
   };
 
   const addItem = (newItem: Omit<CartItem, 'id'>) => {
-    mutatedSinceLoadRef.current = true;
-    setItems((prev) => mergeItems(prev, [{ ...newItem, id: lineId(newItem.variant_id, newItem.fit_type) }]));
+    record({ type: 'add', item: { ...newItem, id: lineId(newItem.variant_id, newItem.fit_type) } });
     setIsCartOpen(true);
   };
 
   const updateQty = (itemId: string, qty: number) => {
+    const item = itemsRef.current.find((i) => i.id === itemId);
+    if (!item) return;
     if (qty <= 0) {
       removeItem(itemId);
       return;
     }
-    mutatedSinceLoadRef.current = true;
-    setItems((prev) =>
-      prev.map((i) => (i.id === itemId ? { ...i, qty: Math.min(MAX_LINE_QTY, Math.floor(qty)) } : i))
-    );
+    record({ type: 'set', variant_id: item.variant_id, fit_type: item.fit_type, qty: Math.min(MAX_LINE_QTY, Math.floor(qty)) });
   };
 
   const removeItem = (itemId: string) => {
-    mutatedSinceLoadRef.current = true;
-    setItems((prev) => prev.filter((i) => i.id !== itemId));
+    const item = itemsRef.current.find((i) => i.id === itemId);
+    if (!item) return;
+    record({ type: 'remove', variant_id: item.variant_id, fit_type: item.fit_type });
   };
 
+  /** Sent immediately (not debounced) so it survives the shopper leaving right after checkout. */
   const clearCart = () => {
-    mutatedSinceLoadRef.current = true;
-    setItems([]);
+    record({ type: 'clear' }, true);
   };
 
   const subtotalKobo = items.reduce(

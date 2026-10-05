@@ -6,6 +6,7 @@ import {
   getPaymentByReference,
   getStoreSettings,
   markPaymentStatus,
+  removePurchasedFromUserCart,
 } from './db';
 import { sendOrderConfirmationEmail } from './email';
 import { settleCharge, type ChargeData, type SettleDeps, type SettleOutcome } from './payments';
@@ -22,13 +23,35 @@ export const liveSettleDeps: SettleDeps = {
   addAuditLog: (entry) => addAuditLog(entry),
 };
 
+/**
+ * Runs once per order (only the settlement that flips it to paid gets `kind: 'paid'`),
+ * so the bag empties on every device even if the confirmation page never loads.
+ */
+async function removePurchasedItemsFromSavedCart(outcome: SettleOutcome): Promise<void> {
+  if (outcome.kind !== 'paid') return;
+  try {
+    const order = await getOrderById(outcome.orderId);
+    if (!order?.user_id) return;
+    const purchased = order.items
+      .filter((i) => i.variant_id)
+      .map((i) => ({ variant_id: i.variant_id as string, fit_type: i.fit_type, qty: i.qty }));
+    await removePurchasedFromUserCart(order.user_id, purchased);
+  } catch (err) {
+    console.error('[payments] clearing saved cart failed:', err);
+  }
+}
+
 /** Webhook path: payload already signature-verified by the caller. */
-export function settleFromWebhook(data: ChargeData): Promise<SettleOutcome> {
-  return settleCharge(liveSettleDeps, data, 'webhook');
+export async function settleFromWebhook(data: ChargeData): Promise<SettleOutcome> {
+  const outcome = await settleCharge(liveSettleDeps, data, 'webhook');
+  await removePurchasedItemsFromSavedCart(outcome);
+  return outcome;
 }
 
 /** Verify path: ask Paystack for the truth, then settle. */
 export async function verifyAndSettle(reference: string): Promise<SettleOutcome> {
   const tx = await verifyPaystackTransaction(reference);
-  return settleCharge(liveSettleDeps, tx, 'verify');
+  const outcome = await settleCharge(liveSettleDeps, tx, 'verify');
+  await removePurchasedItemsFromSavedCart(outcome);
+  return outcome;
 }

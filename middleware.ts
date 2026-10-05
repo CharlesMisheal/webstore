@@ -13,6 +13,13 @@ const ADMIN_ABSOLUTE_MS = 8 * 60 * 60 * 1000;
 const ADMIN_LAST_SEEN_COOKIE = 'aplus_admin_last_seen';
 const ADMIN_STARTED_COOKIE = 'aplus_admin_started';
 
+// Android app (Capacitor) marker. Capacitor appends this token to the WebView's
+// default User-Agent, so every request the app makes carries it and we can tell an
+// app install from a normal browser visit without any handshake or cookie.
+const MOBILE_APP_UA_TOKEN = 'APlusFashionApp';
+/** Flip to true to let the Android app reach /admin as well as the storefront. */
+const MOBILE_APP_ADMIN_ALLOWED = false;
+
 const cookieOpts = {
   httpOnly: true,
   sameSite: 'lax' as const,
@@ -48,6 +55,19 @@ export async function middleware(request: NextRequest) {
 }
 
 async function handle(request: NextRequest) {
+  const { pathname, search } = request.nextUrl;
+
+  // The app ships the storefront only; /admin stays web-only. This narrows the
+  // surface, it is not the security boundary (a User-Agent is trivially spoofed) -
+  // requireAdmin() still gates every admin page, action and route.
+  if (
+    !MOBILE_APP_ADMIN_ALLOWED &&
+    pathname.startsWith('/admin') &&
+    (request.headers.get('user-agent') ?? '').includes(MOBILE_APP_UA_TOKEN)
+  ) {
+    return new NextResponse('Not found', { status: 404 });
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
@@ -64,8 +84,6 @@ async function handle(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname, search } = request.nextUrl;
 
   const redirectWithCookies = (to: string) => {
     const url = request.nextUrl.clone();

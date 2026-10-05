@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { createBrowserSupabase } from '@/lib/supabase/client';
+import { APP_AUTH_CALLBACK, isNativeApp } from '@/lib/native-app';
 
 interface GoogleSignInButtonProps {
   /** Where to land after a successful sign-in (same-origin path). */
@@ -43,6 +44,29 @@ export function GoogleSignInButton({
     setIsLoading(true);
     try {
       const supabase = createBrowserSupabase();
+
+      if (isNativeApp()) {
+        // The PKCE verifier is stored in this WebView's cookies, so the code that comes back
+        // through the app link is exchanged here, and the session belongs to the app.
+        const { data, error: oauthError } = await supabase.auth.signInWithOAuth({
+          provider: 'google',
+          options: {
+            redirectTo: `${APP_AUTH_CALLBACK}?next=${encodeURIComponent(next)}`,
+            skipBrowserRedirect: true,
+            queryParams: forceAccountPicker ? { prompt: 'select_account' } : undefined,
+          },
+        });
+        if (oauthError) throw oauthError;
+        if (!data?.url) throw new Error('Google sign-in could not start. Please try again.');
+        const { Browser } = await import('@capacitor/browser');
+        const finished = await Browser.addListener('browserFinished', () => {
+          setIsLoading(false);
+          void finished.remove();
+        });
+        await Browser.open({ url: data.url });
+        return;
+      }
+
       const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent(next)}`;
       const { error: oauthError } = await supabase.auth.signInWithOAuth({
         provider: 'google',

@@ -39,3 +39,21 @@ aplus-5-admin-mobile/
 admin-mobile-screens/
 design-collage/
 /images/
+
+# Capacitor / Android build output (generated, machine-specific)
+android/app/build/
+android/build/
+android/.gradle/
+android/local.properties
+android/capacitor-cordova-android-plugins/
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+
+# Signing material — NEVER commit. Losing the release key means the installed
+# app can no longer be updated in place (see docs/ANDROID-RELEASE.md).
+android/app/*.jks
+android/app/*.keystore
+android/keystore.properties
+*.jks
+*.keystore

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">A-Plus Fashion</string>
+    <string name="title_activity_main">A-Plus Fashion</string>
+    <string name="package_name">com.aplus.fashion</string>
+    <string name="custom_url_scheme">com.aplus.fashion</string>
+</resources>

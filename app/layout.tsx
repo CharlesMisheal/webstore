@@ -3,6 +3,7 @@ import { Playfair_Display, Inter } from 'next/font/google';
 import './globals.css';
 import { CartProvider } from '@/components/cart/CartContext';
 import { StoreSettingsProvider } from '@/components/providers/StoreSettingsProvider';
+import { NativeAppLinks } from '@/components/providers/NativeAppLinks';
 import { getStoreSettings } from '@/lib/db';
 
 const playfair = Playfair_Display({
@@ -45,6 +46,7 @@ export default async function RootLayout({ children }: Readonly<{ children: Reac
       <body className="min-h-screen flex flex-col bg-ivory text-text font-sans antialiased selection:bg-gold-light selection:text-navy">
         <StoreSettingsProvider settings={settings}>
           <CartProvider fxRates={settings.fx_rates}>{children}</CartProvider>
+          <NativeAppLinks />
         </StoreSettingsProvider>
       </body>
     </html>
